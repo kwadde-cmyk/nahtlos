@@ -74,7 +74,9 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
+    var url by remember(state.serverUrl) {
+        mutableStateOf(state.serverUrl.ifBlank { BuildConfig.NAHTLOS_DEFAULT_SERVER })
+    }
     var token by remember(state.token) { mutableStateOf(state.token) }
     var buffer by remember(state.bufferAheadMinutes) { mutableIntStateOf(state.bufferAheadMinutes) }
     var unmetered by remember(state.downloadOnUnmeteredOnly) { mutableStateOf(state.downloadOnUnmeteredOnly) }
@@ -99,9 +101,19 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
         ) {
             Text("Nahtlos", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "Geparkt einrichten. Danach spielt die Medien-App ab der Position, an der das Telefon pausiert hat.",
+                "Geparkt einrichten. Danach spielt die Medien-App ab der Position, an der das Telefon pausiert hat. Dieser Bildschirm hat kein distractionOptimized und bleibt während der Fahrt gesperrt.",
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+            )
+            CarPairing(
+                serverUrl = url.trim().trimEnd('/'),
+                configured = state.configured,
+            )
+            Text("Server-Adresse", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Nur nötig, wenn sie nicht schon im QR-Code steckt und kein NAHTLOS_DEFAULT_SERVER gebaut wurde.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
             OutlinedTextField(
                 value = url,
@@ -112,6 +124,12 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(16.dp))
+            Text("Token von Hand", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Fallback, wenn das Koppeln nicht geht. Beim Speichern mit dem Admin-Token legt der Server ein eigenes Geräte-Token an.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
@@ -198,14 +216,14 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = {
-                    viewModel.syncNow(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                    viewModel.syncNow(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24, enrollName = "Auto")
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text(if (state.syncing) "Synchronisiert …" else "Speichern und synchronisieren") }
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = {
-                    viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                    viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24, enrollName = "Auto")
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text("Verbindung prüfen") }

@@ -76,7 +76,7 @@ Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`
 
 `automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weitermachen, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`.
 
-Ohne Server-URL und Token liefert die Automotive-App einen leeren Baum mit der Aktion „Server einrichten“. Der Einrichtungs-Screen ist eine normale Activity ohne `distractionOptimized` und damit nur im Parkzustand benutzbar.
+Ohne Server-URL und Token liefert die Automotive-App einen leeren Baum mit der Aktion „Server einrichten“. Der Einrichtungs-Screen ist eine normale Activity ohne `distractionOptimized` und damit nur im Parkzustand benutzbar. Im Auto tippt man kein Token mehr: „Mit Handy verbinden“ zeigt einen QR-Code und einen kurzen Code. Das Handy scannt ihn oder tippt den Code ab und gibt das Auto frei. Die Server-Adresse steckt im QR-Code (`nahtlos://pair?server=...&code=...`). Ist im Auto noch keine Adresse bekannt, gilt der Build-Wert `NAHTLOS_DEFAULT_SERVER` (Gradle-Property oder Umgebungsvariable, sonst leer); notfalls wird nur die Adresse eingetippt.
 
 ## Sync-Server
 
@@ -94,7 +94,30 @@ Token-Auth, ein Haushalt, ein Token. SQLite-Datei, kein extra Datenbank-Server.
 | PUT | `/v1/progress/batch` | bis zu 200 Positionen |
 | WS | `/v1/stream?token=` | erst `{"type":"ready"}`, danach `{"type":"progress",...}` |
 
-`Authorization: Bearer <token>` gilt für alle `/v1`-Routen. Der Query-Parameter `token` ist für den WebSocket gedacht und wird zusätzlich akzeptiert.
+`Authorization: Bearer <token>` gilt für die geschützten `/v1`-Routen. Der Query-Parameter `token` ist für den WebSocket gedacht und wird zusätzlich akzeptiert. `SYNC_TOKEN` bleibt das Admin-Token. Jedes Gerät bekommt danach einen eigenen Token (SHA-256 in der Tabelle `devices`). Das Handy tauscht das Admin-Token beim ersten Speichern automatisch dagegen; das Admin-Token selbst bleibt am Server gültig.
+
+### Geräte koppeln
+
+Wie bei einem Smart-TV: das Auto zeigt den Code, das Handy gibt ihn frei.
+
+| Methode | Pfad | Auth | Bedeutung |
+| --- | --- | --- | --- |
+| POST | `/v1/pair/start` | keine | `{pairingId, code, expiresIn}`, Code 5 Minuten, z. B. `K7P-4QX` |
+| POST | `/v1/pair/approve` | Handy- oder Admin-Token | `{code, name}` gibt das Gerät frei |
+| GET | `/v1/pair/poll?pairingId=` | keine | `pending`, danach einmalig `approved` mit Geräte-Token |
+| POST | `/v1/devices/bootstrap` | nur Admin-Token | legt das erste Gerät an und liefert dessen Token |
+| GET | `/v1/devices` | Gerät oder Admin | Liste, ohne Token |
+| DELETE | `/v1/devices/{id}` | Gerät oder Admin | sperrt das Gerät |
+
+Codes lassen `0`, `O`, `1`, `I` und `L` weg, gelten einmal und laufen ab. Zu viele Starts oder falsche Codes antworten mit 429. Ein gesperrter Geräte-Token bekommt 401.
+
+Auf dem Handy: Einstellungen, „Auto koppeln“. Scanner ist CameraX plus ZXing, ohne Play-Dienste. Daneben die Geräteliste mit Sperren. Im Auto bleibt die Token-Eingabe als Fallback.
+
+Die vorbelegte Auto-Adresse:
+
+```bash
+./gradlew :automotive:assembleDebug -PNAHTLOS_DEFAULT_SERVER=https://podcast.example.com
+```
 
 `accepted: false` heißt: ein anderer Schreibvorgang hat gewonnen, `stored` ist der gültige Stand. Der Client verwirft damit seine ältere Outbox-Zeile.
 
@@ -213,6 +236,7 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 - Automatischer Download der Playlist je Gerät (WLAN-Wunsch und Speicherlimit), lokale Datei vor Stream
 - Fertige Downloads nach einer Wartezeit löschen (Standard 24 Stunden) und optional aus der Playlist nehmen
 - Wiedergabe-Cache für etwa 10 Minuten Funkloch, einstellbar, mit Vorladen der aktuellen Folge im Auto
+- Geräte-Token statt eines gemeinsamen Tokens im Auto: QR-Code oder Kurzcode, Freigabe vom Handy, Sperren in der Geräteliste
 - Pause, Seek, ±15/30 Sekunden, Kapitel wenn sie im Feed oder in der Kapiteldatei stehen
 - Position lokal speichern und mit dem Server abgleichen, in beide Richtungen
 - Outbox, WorkManager-Flush, Pull beim Session-Start und im Vordergrund, 1,5-Sekunden-Grenze vor dem Play

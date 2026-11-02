@@ -80,6 +80,10 @@ class SyncRepository @Inject constructor(
 
     fun deviceId(): String = settings.read().deviceId
 
+    fun currentSettings() = settings.read()
+
+    fun serverDeviceId(): String = settings.serverDeviceId()
+
     suspend fun onNetworkAvailable() {
         pullAndMerge(force = true)
     }
@@ -159,6 +163,32 @@ class SyncRepository @Inject constructor(
         if (!current.configured) return "Server-URL und Token fehlen"
         api.health(current)
         return "Server erreichbar"
+    }
+
+    /**
+     * The first login still uses the household admin token. The server then hands
+     * this install its own device token and the admin token stays on the server.
+     * A token that is already a device token comes back as 403 and is left as-is.
+     */
+    suspend fun enrollOwnDevice(name: String): String? {
+        val current = settings.read()
+        if (!current.configured) return null
+        val created = try {
+            api.bootstrap(current, name.trim().ifBlank { "Gerät" })
+        } catch (error: SyncHttpException) {
+            if (error.code == 403) return null
+            throw error
+        }
+        settings.saveServerDeviceId(created.id)
+        settings.save(
+            serverUrl = current.serverUrl,
+            token = created.token,
+            bufferAheadMinutes = current.bufferAheadMinutes,
+            downloadOnUnmeteredOnly = current.downloadOnUnmeteredOnly,
+            downloadLimitMb = current.downloadLimitMb,
+            deletePlayedAfterHours = current.deletePlayedAfterHours,
+        )
+        return "Eigenes Geräte-Token für „${created.name}“ gespeichert. Das Admin-Token bleibt am Server gültig."
     }
 
     suspend fun pushSubscription(feedUrl: String) {

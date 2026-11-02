@@ -1,7 +1,15 @@
 package de.jenz.nahtlos.core.sync
 
 import de.jenz.nahtlos.core.net.Net
+import de.jenz.nahtlos.model.BootstrapRequest
+import de.jenz.nahtlos.model.BootstrapResponse
+import de.jenz.nahtlos.model.DeviceSummary
 import de.jenz.nahtlos.model.EpisodeProgress
+import de.jenz.nahtlos.model.ErrorBody
+import de.jenz.nahtlos.model.PairApproveRequest
+import de.jenz.nahtlos.model.PairApproveResponse
+import de.jenz.nahtlos.model.PairPollResponse
+import de.jenz.nahtlos.model.PairStartResponse
 import de.jenz.nahtlos.model.ProgressBatchRequest
 import de.jenz.nahtlos.model.ProgressBatchResponse
 import de.jenz.nahtlos.model.ProgressWriteResponse
@@ -79,6 +87,41 @@ class SyncClient @Inject constructor(
         return json.decodeFromString(result)
     }
 
+    suspend fun pairStart(serverUrl: String): PairStartResponse {
+        val result = net.exchange(endpoint(serverUrl, "/v1/pair/start"), "POST", "{}", jsonHeaders(auth = null))
+        if (result.code !in 200..299) throw httpFailure(result.code, result.body)
+        return json.decodeFromString(result.body)
+    }
+
+    suspend fun pairPoll(serverUrl: String, pairingId: String): PairPollResponse {
+        val id = URLEncoder.encode(pairingId, Charsets.UTF_8.name())
+        val result = net.exchange(endpoint(serverUrl, "/v1/pair/poll?pairingId=$id"), "GET", null, jsonHeaders(auth = null))
+        if (result.code !in 200..299) throw httpFailure(result.code, result.body)
+        return json.decodeFromString(result.body)
+    }
+
+    suspend fun pairApprove(
+        settings: ServerSettings,
+        code: String,
+        name: String,
+        serverUrl: String = settings.serverUrl,
+    ): PairApproveResponse {
+        val body = json.encodeToString(PairApproveRequest(code = code, name = name))
+        return json.decodeFromString(authed(settings.copy(serverUrl = serverUrl), "/v1/pair/approve", "POST", body))
+    }
+
+    suspend fun listDevices(settings: ServerSettings): List<DeviceSummary> =
+        json.decodeFromString(authed(settings, "/v1/devices", "GET", null))
+
+    suspend fun revokeDevice(settings: ServerSettings, id: String) {
+        authed(settings, "/v1/devices/${URLEncoder.encode(id, Charsets.UTF_8.name())}", "DELETE", null)
+    }
+
+    suspend fun bootstrap(settings: ServerSettings, name: String): BootstrapResponse {
+        val body = json.encodeToString(BootstrapRequest(name))
+        return json.decodeFromString(authed(settings, "/v1/devices/bootstrap", "POST", body))
+    }
+
     suspend fun putOpml(settings: ServerSettings, opml: String): List<Subscription> {
         val result = authed(settings, "/v1/subscriptions/opml", "PUT", json.encodeToString(OpmlUpload(opml)))
         return json.decodeFromString(result)
@@ -95,15 +138,26 @@ class SyncClient @Inject constructor(
                 "Content-Type" to "application/json",
             ),
         )
-        if (result.code == 401) throw SyncHttpException(401, "Token abgelehnt")
-        if (result.code !in 200..299) {
-            throw SyncHttpException(result.code, "Sync-Server antwortet mit ${result.code}")
-        }
+        if (result.code !in 200..299) throw httpFailure(result.code, result.body)
         return result.body
     }
 
-    private fun url(settings: ServerSettings, path: String): String {
-        val base = settings.serverUrl.trimEnd('/')
+    private fun jsonHeaders(auth: String?): Map<String, String> = buildMap {
+        if (auth != null) put("Authorization", "Bearer $auth")
+        put("Accept", "application/json")
+        put("Content-Type", "application/json")
+    }
+
+    private fun httpFailure(code: Int, body: String): SyncHttpException {
+        val message = runCatching { json.decodeFromString(ErrorBody.serializer(), body).error }.getOrNull()
+        val fallback = if (code == 401) "Token abgelehnt" else "Sync-Server antwortet mit $code"
+        return SyncHttpException(code, message ?: fallback)
+    }
+
+    private fun endpoint(serverUrl: String, path: String): String {
+        val base = serverUrl.trim().trimEnd('/')
         return base + if (path.startsWith("/")) path else "/$path"
     }
+
+    private fun url(settings: ServerSettings, path: String): String = endpoint(settings.serverUrl, path)
 }

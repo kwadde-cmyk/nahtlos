@@ -60,4 +60,11 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.coil.compose)
     implementation(libs.coroutines.android)
+    implementation(libs.zxing.core)
+    implementation(libs.camera.core)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.concurrent.futures)
+    implementation(libs.guava)
 }

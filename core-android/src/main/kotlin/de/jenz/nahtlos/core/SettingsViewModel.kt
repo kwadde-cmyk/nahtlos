@@ -98,11 +98,14 @@ class SettingsViewModel @Inject constructor(
         downloadOnUnmeteredOnly: Boolean,
         downloadLimitMb: Int,
         deletePlayedAfterHours: Int,
+        enrollName: String = "Handy",
     ) {
         save(serverUrl, token, bufferAheadMinutes, downloadOnUnmeteredOnly, downloadLimitMb, deletePlayedAfterHours)
         viewModelScope.launch {
             val message = try {
-                sync.testConnection()
+                val enrolled = sync.enrollOwnDevice(enrollName)
+                val health = sync.testConnection()
+                enrolled?.let { "$it $health" } ?: health
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -119,10 +122,19 @@ class SettingsViewModel @Inject constructor(
         downloadOnUnmeteredOnly: Boolean,
         downloadLimitMb: Int,
         deletePlayedAfterHours: Int,
+        enrollName: String = "Handy",
     ) {
         save(serverUrl, token, bufferAheadMinutes, downloadOnUnmeteredOnly, downloadLimitMb, deletePlayedAfterHours)
         viewModelScope.launch {
-            sync.pullAndMerge(force = true)
+            try {
+                val enrolled = sync.enrollOwnDevice(enrollName)
+                if (enrolled != null) _notice.emit(enrolled)
+                sync.pullAndMerge(force = true)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _notice.emit(error.message ?: "Sync fehlgeschlagen")
+            }
         }
     }
 

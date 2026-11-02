@@ -56,7 +56,12 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, wide: Boolean = false, viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenPairing: () -> Unit = {},
+    wide: Boolean = false,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by remember(state.token) { mutableStateOf(state.token) }
@@ -187,6 +192,11 @@ fun SettingsScreen(onBack: () -> Unit, wide: Boolean = false, viewModel: Setting
                 onClick = { viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24) },
                 modifier = Modifier.fillMaxWidth().height(if (wide) 64.dp else 52.dp),
             ) { Text("Verbindung prüfen") }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onOpenPairing,
+                modifier = Modifier.fillMaxWidth().height(if (wide) 64.dp else 52.dp),
+            ) { Text("Auto koppeln") }
             Spacer(Modifier.height(20.dp))
             Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)
             if (crash.isNullOrBlank()) {
