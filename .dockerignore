@@ -1,0 +1,12 @@
+.git
+.gradle
+**/build
+uploads
+local.properties
+*.apk
+*.aab
+.idea
+*.md
+mobile
+core-android
+automotive
