@@ -23,6 +23,7 @@ class PlaybackSync(
     private val player: Player,
     private val sync: SyncRepository,
     private val scope: CoroutineScope,
+    private val onEpisodeEnded: (String) -> Unit = {},
 ) : Player.Listener {
     private var heartbeat: Job? = null
     private var ignoreSeekUntil = 0L
@@ -81,7 +82,11 @@ class PlaybackSync(
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED) push(ProgressStatus.COMPLETED)
+        if (playbackState == Player.STATE_ENDED) {
+            push(ProgressStatus.COMPLETED)
+            val key = player.currentMediaItem?.mediaId
+            if (!key.isNullOrBlank() && !LibraryIds.isFolder(key)) onEpisodeEnded(key)
+        }
     }
 
     private fun push(status: ProgressStatus) {

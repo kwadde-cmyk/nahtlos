@@ -19,7 +19,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -70,6 +72,9 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by remember(state.token) { mutableStateOf(state.token) }
     var buffer by remember(state.bufferAheadMinutes) { mutableIntStateOf(state.bufferAheadMinutes) }
+    var unmetered by remember(state.downloadOnUnmeteredOnly) { mutableStateOf(state.downloadOnUnmeteredOnly) }
+    var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
+    var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) { viewModel.refresh() }
     LaunchedEffect(viewModel) {
@@ -118,7 +123,25 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 steps = PlaybackCachePolicy.MAX_AHEAD_MINUTES - PlaybackCachePolicy.MIN_AHEAD_MINUTES - 1,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             )
-            Text("Geräte-ID", style = MaterialTheme.typography.labelLarge)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Downloads nur ohne Mobilfunk", modifier = Modifier.weight(1f))
+                Switch(checked = unmetered, onCheckedChange = { unmetered = it })
+            }
+            OutlinedTextField(
+                value = limit,
+                onValueChange = { limit = it.filter { char -> char.isDigit() }.take(6) },
+                label = { Text("Speicherlimit (MB)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            OutlinedTextField(
+                value = deleteHours,
+                onValueChange = { deleteHours = it.filter { char -> char.isDigit() }.take(4) },
+                label = { Text("Gespieltes löschen nach Stunden") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("Geräte-ID", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
             SelectionContainer {
                 Text(state.deviceId.ifBlank { "…" }, fontFamily = FontFamily.Monospace)
             }
@@ -133,12 +156,16 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
             }
             Spacer(Modifier.height(20.dp))
             Button(
-                onClick = { viewModel.syncNow(url, token, buffer) },
+                onClick = {
+                    viewModel.syncNow(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text(if (state.syncing) "Synchronisiert …" else "Speichern und synchronisieren") }
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
-                onClick = { viewModel.test(url, token, buffer) },
+                onClick = {
+                    viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text("Verbindung prüfen") }
         }

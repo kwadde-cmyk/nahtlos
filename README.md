@@ -103,7 +103,25 @@ export SYNC_TOKEN=ein-langes-geheimnis
 docker compose up --build
 ```
 
-Der Dienst heißt im Compose-File `nahtlos`, das Image `nahtlos:local`. Er lauscht auf Port 8787, die Datenbank liegt im Volume unter `/data/sync.db`.
+Der Dienst heißt im Compose-File `nahtlos`, das Image `nahtlos:local`. **Im Container lauscht er fest auf Port 8787.** Der Port auf dem Host ist `NAHTLOS_PORT` (Standard ebenfalls 8787):
+
+```bash
+NAHTLOS_PORT=8790 docker compose up --build
+```
+
+Die Datenbank liegt im Volume unter `/data/sync.db`.
+
+### Nginx Proxy Manager
+
+Lege einen Proxy Host auf die öffentliche HTTPS-Adresse an, zum Beispiel `https://podcast.example.com`.
+
+- Scheme: `http`
+- Forward Hostname: die IP oder der Docker-Name `nahtlos`
+- Forward Port: `8787`, wenn NPM im selben Compose-Netz hängt, sonst der Wert von `NAHTLOS_PORT` auf dem Host
+- Websockets Support: an
+- SSL-Zertifikat am Proxy, nicht im Nahtlos-Container
+
+Der Server liest `X-Forwarded-Proto`, `X-Forwarded-Host` und `X-Forwarded-For`. Die App trägt als Server-URL genau die öffentliche Adresse ein (`https://podcast.example.com`, ohne `:8787`, wenn NPM auf 443 liegt). Aus `https` macht der Client `wss` für `/v1/stream`. NPM beendet TLS und reicht die Verbindung als normales WebSocket an Port 8787 weiter.
 
 Ohne Docker, mit JDK 17 oder 21:
 
@@ -172,13 +190,16 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 
 ## Tests
 
-`core-model` prüft Last-Write-Wins, die Outbox-Planung, die Cache-Größe (10 Minuten, Bitrate, LRU-Rahmen), den RSS-Parser (GUID, Personen, Transkript, Kapitel-URL, Podlove-Kapitel) und die gPodder-Sekundenabbildung. `server` prüft Token, Roundtrip, älteren Schreibvorgang, späteren Rücksprung, Batch, Abos und den WebSocket.
+`core-model` prüft Last-Write-Wins, die Playlist (Datum, Sortierung, Refresh, Reihenfolge, Autoplay-Nachbar, Entfernen fertiger Folgen), die Download-Frist und das Speicherlimit, OPML, die Outbox-Planung, die Cache-Größe, den RSS-Parser und die gPodder-Sekundenabbildung. `server` prüft Token, Positionen, Playlist-Sync, OPML-Import und den WebSocket.
 
 Nicht gelaufen: Android-Emulator, AAOS-Emulator, ein echter Tunnel, instrumentierte Tests, `docker compose` in dieser Umgebung nur als Bauanleitung. `./gradlew assembleDebug` baut beide APKs.
 
 ## Was diese Version kann
 
-- RSS per URL abonnieren, Folgen listen, streamen
+- RSS per URL abonnieren, Folgen listen, streamen, OPML importieren und exportieren
+- Playlist „alles seit Datum“ mit Sortierung, Umsortieren, Entfernen, Sync aufs Auto und Autoplay der nächsten Folge
+- Automatischer Download der Playlist je Gerät (WLAN-Wunsch und Speicherlimit), lokale Datei vor Stream
+- Fertige Downloads nach einer Wartezeit löschen (Standard 24 Stunden) und optional aus der Playlist nehmen
 - Wiedergabe-Cache für etwa 10 Minuten Funkloch, einstellbar, mit Vorladen der aktuellen Folge im Auto
 - Pause, Seek, ±15/30 Sekunden, Kapitel wenn sie im Feed oder in der Kapiteldatei stehen
 - Position lokal speichern und mit dem Server abgleichen, in beide Richtungen
@@ -188,7 +209,7 @@ Nicht gelaufen: Android-Emulator, AAOS-Emulator, ein echter Tunnel, instrumentie
 
 ## Was noch nicht da ist
 
-- Dauerhafte Downloads einer ganzen Folge (der Cache ist LRU und kann verworfen werden)
+- Downloads außerhalb der Playlist (nur die Playlist wird automatisch geladen; der Cache bleibt LRU)
 - Up Next / Queue
 - Podcast-Index-Suche
 - Transkript im Player, nur der Link

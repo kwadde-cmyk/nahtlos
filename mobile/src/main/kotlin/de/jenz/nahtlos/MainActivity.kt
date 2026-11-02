@@ -33,6 +33,7 @@ import de.jenz.nahtlos.ui.HomeScreen
 import de.jenz.nahtlos.ui.HomeViewModel
 import de.jenz.nahtlos.ui.MiniPlayer
 import de.jenz.nahtlos.ui.PlayerScreen
+import de.jenz.nahtlos.ui.PlaylistScreen
 import de.jenz.nahtlos.ui.SettingsScreen
 import de.jenz.nahtlos.ui.NahtlosTheme
 
@@ -82,6 +83,7 @@ private fun AppNav() {
                         nav.navigate(if (encoded == null) "player" else "player?episode=$encoded")
                     },
                     onOpenSettings = { nav.navigate("settings") },
+                    onOpenPlaylist = { nav.navigate("playlist") },
                     viewModel = homeViewModel,
                 )
             }
@@ -103,6 +105,12 @@ private fun AppNav() {
                 }),
             ) {
                 PlayerScreen(onBack = { nav.popBackStack() })
+            }
+            composable("playlist") {
+                PlaylistScreen(
+                    onBack = { nav.popBackStack() },
+                    onPlay = { key -> nav.navigate("player?episode=${Uri.encode(key)}") },
+                )
             }
             composable("settings") {
                 SettingsScreen(onBack = { nav.popBackStack() })

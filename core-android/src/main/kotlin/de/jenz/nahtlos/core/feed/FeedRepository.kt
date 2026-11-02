@@ -13,6 +13,8 @@ import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.feed.ChapterJsonParser
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.feed.RssFeedParser
+import de.jenz.nahtlos.opml.Opml
+import de.jenz.nahtlos.opml.OpmlOutline
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.FeedParseException
 import de.jenz.nahtlos.model.NahtlosJson
@@ -42,6 +44,39 @@ class FeedRepository @Inject constructor(
     suspend fun getPodcast(id: String): PodcastEntity? = db.podcasts().get(id)
 
     suspend fun getEpisode(episodeKey: String): EpisodeEntity? = db.episodes().get(episodeKey)
+
+    suspend fun exportOpml(): String = withContext(Dispatchers.IO) {
+        val outlines = db.podcasts().all().map { OpmlOutline(title = it.title, feedUrl = it.feedUrl) }
+        Opml.write("Nahtlos", outlines)
+    }
+
+    suspend fun rememberFeed(rawUrl: String, title: String) = withContext(Dispatchers.IO) {
+        val url = try {
+            normalizeHttp(rawUrl)
+        } catch (_: Exception) {
+            return@withContext
+        }
+        if (db.podcasts().byFeedUrl(url) != null) return@withContext
+        try {
+            refreshUrl(url, markNeedsSync = true)
+        } catch (_: Exception) {
+            db.podcasts().upsert(
+                PodcastEntity(
+                    id = EpisodeKeys.podcastId(null, url),
+                    feedUrl = url,
+                    title = title.ifBlank { url },
+                    description = "",
+                    imageUrl = null,
+                    podcastGuid = null,
+                    author = null,
+                    link = null,
+                    personsJson = "[]",
+                    lastFetchedAt = 0,
+                    needsSync = true,
+                ),
+            )
+        }
+    }
 
     suspend fun subscribe(rawUrl: String, markNeedsSync: Boolean): PodcastEntity = withContext(Dispatchers.IO) {
         val url = normalizeHttp(rawUrl)

@@ -69,6 +69,21 @@ interface EpisodeDao {
 
     @Query("DELETE FROM episodes WHERE podcastId = :podcastId")
     suspend fun deleteForPodcast(podcastId: String)
+
+    @Query(
+        """
+        SELECT e.episodeKey AS episodeKey,
+               e.title AS title,
+               e.publishedAt AS publishedAt,
+               e.enclosureUrl AS enclosureUrl,
+               p.title AS podcastTitle,
+               p.feedUrl AS feedUrl
+        FROM episodes e
+        INNER JOIN podcasts p ON p.id = e.podcastId
+        WHERE e.publishedAt IS NOT NULL
+        """,
+    )
+    suspend fun candidates(): List<EpisodeCandidateRow>
 }
 
 @Dao
@@ -147,6 +162,39 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox WHERE episodeKey IN (:keys)")
     suspend fun deleteKeys(keys: List<String>)
+}
+
+@Dao
+interface PlaylistDao {
+    @Query("SELECT * FROM playlist_doc WHERE id = 1")
+    suspend fun get(): PlaylistDocEntity?
+
+    @Query("SELECT * FROM playlist_doc WHERE id = 1")
+    fun observe(): Flow<PlaylistDocEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: PlaylistDocEntity)
+}
+
+@Dao
+interface DownloadDao {
+    @Query("SELECT * FROM downloads")
+    suspend fun all(): List<DownloadEntity>
+
+    @Query("SELECT * FROM downloads WHERE episodeKey = :episodeKey")
+    suspend fun get(episodeKey: String): DownloadEntity?
+
+    @Query("SELECT COALESCE(SUM(bytes), 0) FROM downloads")
+    suspend fun usedBytes(): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: DownloadEntity)
+
+    @Query("UPDATE downloads SET completedAt = :completedAt WHERE episodeKey = :episodeKey AND completedAt IS NULL")
+    suspend fun markCompleted(episodeKey: String, completedAt: Long)
+
+    @Query("DELETE FROM downloads WHERE episodeKey = :episodeKey")
+    suspend fun delete(episodeKey: String)
 }
 
 @Dao

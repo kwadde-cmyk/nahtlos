@@ -10,6 +10,8 @@ import de.jenz.nahtlos.core.db.toOutbox
 import de.jenz.nahtlos.core.db.toProgressEntity
 import de.jenz.nahtlos.core.db.toSubscription
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
+import de.jenz.nahtlos.opml.Opml
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.model.EpisodeProgress
 import de.jenz.nahtlos.model.ProgressStatus
@@ -49,6 +51,7 @@ class SyncRepository @Inject constructor(
     private val settings: SettingsStore,
     private val feeds: FeedRepository,
     private val outboxWork: OutboxWork,
+    private val playlists: PlaylistRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
@@ -102,6 +105,8 @@ class SyncRepository @Inject constructor(
             }
             try {
                 syncProgress(current)
+                playlists.pull()
+                playlists.dropRemotelyFinished()
                 lastPullAt = System.currentTimeMillis()
             } catch (e: Exception) {
                 error = explain(e)
@@ -115,6 +120,19 @@ class SyncRepository @Inject constructor(
                 )
             }
         }
+    }
+
+    suspend fun importOpml(xml: String): Int {
+        val outlines = Opml.parse(xml)
+        for (outline in outlines) feeds.rememberFeed(outline.feedUrl, outline.title)
+        val current = settings.read()
+        if (current.configured) {
+            runCatching { api.putOpml(current, xml) }
+            runCatching { pushSubscriptionChanges(current) }
+                .onFailure { error -> _status.update { it.copy(lastError = explain(error)) } }
+        }
+        scheduleFlush()
+        return outlines.size
     }
 
     suspend fun testConnection(): String {
@@ -238,6 +256,11 @@ class SyncRepository @Inject constructor(
     suspend fun onSocketMessage(text: String) {
         val event = runCatching { NahtlosJson.json.decodeFromString<SyncEvent>(text) }.getOrNull() ?: return
         val progress = event.progress ?: return
+        val remotePlaylist = event.playlist
+        if (event.type == SyncEvent.TYPE_PLAYLIST && remotePlaylist != null) {
+            playlists.applyRemote(remotePlaylist)
+            return
+        }
         if (event.type != SyncEvent.TYPE_PROGRESS) return
         if (progress.deviceId == settings.read().deviceId) return
         applyRemote(progress)

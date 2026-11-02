@@ -17,6 +17,9 @@ data class ServerSettings(
     val token: String,
     val deviceId: String,
     val bufferAheadMinutes: Int = PlaybackCachePolicy.DEFAULT_AHEAD_MINUTES,
+    val downloadOnUnmeteredOnly: Boolean = true,
+    val downloadLimitMb: Int = 2048,
+    val deletePlayedAfterHours: Int = 24,
 ) {
     val configured: Boolean
         get() = (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) && token.isNotBlank()
@@ -39,10 +42,20 @@ class SettingsStore @Inject constructor(
             bufferAheadMinutes = PlaybackCachePolicy.clampMinutes(
                 prefs.getInt(KEY_BUFFER, PlaybackCachePolicy.DEFAULT_AHEAD_MINUTES),
             ),
+            downloadOnUnmeteredOnly = prefs.getBoolean(KEY_UNMETERED, true),
+            downloadLimitMb = prefs.getInt(KEY_LIMIT, 2048).coerceIn(128, 100_000),
+            deletePlayedAfterHours = prefs.getInt(KEY_DELETE_HOURS, 24).coerceIn(0, 24 * 30),
         )
     }
 
-    fun save(serverUrl: String, token: String, bufferAheadMinutes: Int) {
+    fun save(
+        serverUrl: String,
+        token: String,
+        bufferAheadMinutes: Int,
+        downloadOnUnmeteredOnly: Boolean = read().downloadOnUnmeteredOnly,
+        downloadLimitMb: Int = read().downloadLimitMb,
+        deletePlayedAfterHours: Int = read().deletePlayedAfterHours,
+    ) {
         val normalized = serverUrl.trim().trimEnd('/').let { url ->
             if (url.isEmpty()) "" else EpisodeKeys.normalizeFeedUrl(url)
         }
@@ -50,6 +63,9 @@ class SettingsStore @Inject constructor(
             .putString(KEY_URL, normalized)
             .putString(KEY_TOKEN, token.trim())
             .putInt(KEY_BUFFER, PlaybackCachePolicy.clampMinutes(bufferAheadMinutes))
+            .putBoolean(KEY_UNMETERED, downloadOnUnmeteredOnly)
+            .putInt(KEY_LIMIT, downloadLimitMb.coerceIn(128, 100_000))
+            .putInt(KEY_DELETE_HOURS, deletePlayedAfterHours.coerceIn(0, 24 * 30))
             .apply()
     }
 
@@ -65,5 +81,8 @@ class SettingsStore @Inject constructor(
         private const val KEY_TOKEN = "token"
         private const val KEY_DEVICE = "deviceId"
         private const val KEY_BUFFER = "bufferAheadMinutes"
+        private const val KEY_UNMETERED = "downloadOnUnmeteredOnly"
+        private const val KEY_LIMIT = "downloadLimitMb"
+        private const val KEY_DELETE_HOURS = "deletePlayedAfterHours"
     }
 }

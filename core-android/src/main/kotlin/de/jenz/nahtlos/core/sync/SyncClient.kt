@@ -7,6 +7,8 @@ import de.jenz.nahtlos.model.ProgressBatchResponse
 import de.jenz.nahtlos.model.ProgressWriteResponse
 import de.jenz.nahtlos.model.Subscription
 import de.jenz.nahtlos.model.NahtlosJson
+import de.jenz.nahtlos.playlist.ListeningPlaylist
+import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import kotlinx.serialization.encodeToString
 import java.io.IOException
 import java.net.URLEncoder
@@ -14,6 +16,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 class SyncHttpException(val code: Int, message: String) : IOException(message)
+
+@kotlinx.serialization.Serializable
+private data class OpmlUpload(val opml: String)
 
 @Singleton
 class SyncClient @Inject constructor(
@@ -62,6 +67,21 @@ class SyncClient @Inject constructor(
         val payload = json.encodeToString(ProgressBatchRequest(items))
         val result = authed(settings, "/v1/progress/batch", "PUT", payload)
         return json.decodeFromString<ProgressBatchResponse>(result).results
+    }
+
+    suspend fun getPlaylist(settings: ServerSettings): ListeningPlaylist {
+        val result = authed(settings, "/v1/playlist", "GET", null)
+        return json.decodeFromString(result)
+    }
+
+    suspend fun putPlaylist(settings: ServerSettings, playlist: ListeningPlaylist): PlaylistWriteResponse {
+        val result = authed(settings, "/v1/playlist", "PUT", json.encodeToString(playlist))
+        return json.decodeFromString(result)
+    }
+
+    suspend fun putOpml(settings: ServerSettings, opml: String): List<Subscription> {
+        val result = authed(settings, "/v1/subscriptions/opml", "PUT", json.encodeToString(OpmlUpload(opml)))
+        return json.decodeFromString(result)
     }
 
     private suspend fun authed(settings: ServerSettings, path: String, method: String, body: String?): String {

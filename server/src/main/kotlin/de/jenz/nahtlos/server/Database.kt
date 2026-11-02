@@ -1,9 +1,13 @@
 package de.jenz.nahtlos.server
 
 import de.jenz.nahtlos.model.EpisodeProgress
+import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.model.ProgressWriteResponse
 import de.jenz.nahtlos.model.Subscription
+import de.jenz.nahtlos.playlist.ListeningPlaylist
+import de.jenz.nahtlos.playlist.PlaylistResolver
+import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import de.jenz.nahtlos.sync.ProgressResolver
 import java.sql.Connection
 import java.sql.DriverManager
@@ -27,6 +31,16 @@ class SyncDatabase(path: String) : AutoCloseable {
                       podcast_guid TEXT,
                       image_url TEXT,
                       updated_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS playlist (
+                      id TEXT PRIMARY KEY,
+                      document TEXT NOT NULL,
+                      updated_at INTEGER NOT NULL,
+                      server_received_at INTEGER NOT NULL
                     )
                     """.trimIndent(),
                 )
@@ -190,6 +204,55 @@ class SyncDatabase(path: String) : AutoCloseable {
         }
     }
 
+    fun getPlaylist(): ListeningPlaylist? = synchronized(lock) {
+        connection.prepareStatement("SELECT document FROM playlist WHERE id = 'default'").use { statement ->
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                NahtlosJson.json.decodeFromString<ListeningPlaylist>(rows.getString(1))
+            }
+        }
+    }
+
+    fun applyPlaylist(incoming: ListeningPlaylist, now: Long): PlaylistApply = synchronized(lock) {
+        val stamped = incoming.copy(serverReceivedAt = now)
+        val existing = getPlaylistUnlocked()
+        if (existing == null || stamped.updatedAt > existing.updatedAt) {
+            savePlaylist(stamped)
+            return PlaylistApply(PlaylistWriteResponse(true, stamped), changed = true)
+        }
+        if (stamped.updatedAt == existing.updatedAt && stamped.deviceId == existing.deviceId) {
+            return PlaylistApply(PlaylistWriteResponse(true, existing), changed = false)
+        }
+        PlaylistApply(PlaylistWriteResponse(false, existing), changed = false)
+    }
+
+    private fun getPlaylistUnlocked(): ListeningPlaylist? {
+        connection.prepareStatement("SELECT document FROM playlist WHERE id = 'default'").use { statement ->
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                return NahtlosJson.json.decodeFromString<ListeningPlaylist>(rows.getString(1))
+            }
+        }
+    }
+
+    private fun savePlaylist(playlist: ListeningPlaylist) {
+        connection.prepareStatement(
+            """
+            INSERT INTO playlist(id, document, updated_at, server_received_at)
+            VALUES ('default', ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              document = excluded.document,
+              updated_at = excluded.updated_at,
+              server_received_at = excluded.server_received_at
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, NahtlosJson.json.encodeToString(ListeningPlaylist.serializer(), playlist))
+            statement.setLong(2, playlist.updatedAt)
+            statement.setLong(3, playlist.serverReceivedAt ?: 0)
+            statement.executeUpdate()
+        }
+    }
+
     override fun close() {
         synchronized(lock) { connection.close() }
     }
@@ -210,5 +273,10 @@ class SyncDatabase(path: String) : AutoCloseable {
 
 data class ApplyResult(
     val response: ProgressWriteResponse,
+    val changed: Boolean,
+)
+
+data class PlaylistApply(
+    val response: PlaylistWriteResponse,
     val changed: Boolean,
 )

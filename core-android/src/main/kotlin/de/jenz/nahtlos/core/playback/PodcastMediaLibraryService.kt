@@ -21,6 +21,8 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.playlist.DownloadScheduler
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +41,8 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var sync: SyncRepository
     @Inject lateinit var settings: SettingsStore
     @Inject lateinit var playbackCache: PlaybackCache
+    @Inject lateinit var playlists: PlaylistRepository
+    @Inject lateinit var downloads: DownloadScheduler
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var player: ExoPlayer? = null
@@ -63,7 +67,25 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             .setSeekForwardIncrementMs(30_000)
             .build()
         player = exo
-        val syncer = PlaybackSync(exo, sync, scope)
+        val syncer = PlaybackSync(exo, sync, scope) { episodeKey ->
+            scope.launch {
+                val next = runCatching { playlists.onEpisodeFinished(episodeKey) }.getOrNull()
+                if (next != null) {
+                    val item = browser.resolvePlayable(next)
+                    val position = runCatching { sync.positionForPlayback(next) }.getOrDefault(0L)
+                    if (item != null) {
+                        withContext(Dispatchers.Main) {
+                            val current = player ?: return@withContext
+                            playbackSync?.suppressPushes()
+                            current.setMediaItem(item, position)
+                            current.prepare()
+                            current.play()
+                        }
+                    }
+                }
+                downloads.enqueue()
+            }
+        }
         playbackSync = syncer
         syncer.start()
         val sessionActivity = packageManager.getLaunchIntentForPackage(packageName)?.let { intent ->

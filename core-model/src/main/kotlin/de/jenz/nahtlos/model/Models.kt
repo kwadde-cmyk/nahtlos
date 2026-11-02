@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.model
 
+import de.jenz.nahtlos.playlist.ListeningPlaylist
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -91,9 +92,11 @@ data class ErrorBody(
 data class SyncEvent(
     val type: String,
     val progress: EpisodeProgress? = null,
+    val playlist: ListeningPlaylist? = null,
 ) {
     companion object {
         const val TYPE_PROGRESS = "progress"
+        const val TYPE_PLAYLIST = "playlist"
     }
 }
 

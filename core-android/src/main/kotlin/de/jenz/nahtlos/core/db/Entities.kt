@@ -72,6 +72,31 @@ data class PendingUnsubEntity(
     @PrimaryKey val feedUrl: String,
 )
 
+@Entity(tableName = "playlist_doc")
+data class PlaylistDocEntity(
+    @PrimaryKey val id: Int = 1,
+    val json: String,
+    val needsSync: Boolean,
+)
+
+@Entity(tableName = "downloads")
+data class DownloadEntity(
+    @PrimaryKey val episodeKey: String,
+    val filePath: String,
+    val bytes: Long,
+    val downloadedAt: Long,
+    val completedAt: Long?,
+)
+
+data class EpisodeCandidateRow(
+    val episodeKey: String,
+    val title: String,
+    val publishedAt: Long,
+    val enclosureUrl: String,
+    val podcastTitle: String,
+    val feedUrl: String,
+)
+
 data class ContinueRow(
     val episodeKey: String,
     val episodeTitle: String,

@@ -7,6 +7,9 @@ import de.jenz.nahtlos.core.db.EpisodeEntity
 import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
+import de.jenz.nahtlos.core.playlist.entry
 import java.net.URLDecoder
 import java.net.URLEncoder
 import javax.inject.Inject
@@ -16,6 +19,8 @@ import javax.inject.Singleton
 class LibraryBrowser @Inject constructor(
     private val db: NahtlosDatabase,
     private val feeds: FeedRepository,
+    private val playlists: PlaylistRepository,
+    private val downloads: DownloadStore,
 ) {
     fun rootItem(): MediaItem = folder(LibraryIds.ROOT, "Nahtlos", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
 
@@ -28,9 +33,11 @@ class LibraryBrowser @Inject constructor(
 
     suspend fun children(parentId: String): List<MediaItem> = when (parentId) {
         LibraryIds.ROOT -> listOf(
+            folder(LibraryIds.PLAYLIST, "Playlist", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
             folder(LibraryIds.CONTINUE, "Weitermachen", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
             folder(LibraryIds.SUBSCRIPTIONS, "Abonnements", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
         )
+        LibraryIds.PLAYLIST -> playlistItems()
         LibraryIds.CONTINUE -> continueItems()
         LibraryIds.SUBSCRIPTIONS -> subscriptionItems()
         else -> {
@@ -48,9 +55,54 @@ class LibraryBrowser @Inject constructor(
 
     suspend fun resolvePlayable(mediaId: String): MediaItem? {
         if (mediaId.isBlank() || LibraryIds.isFolder(mediaId)) return null
-        val episode = db.episodes().get(mediaId) ?: return null
-        val podcast = db.podcasts().get(episode.podcastId)
-        return episodeItem(episode, podcast, playable = true)
+        val episode = db.episodes().get(mediaId)
+        if (episode != null) {
+            val podcast = db.podcasts().get(episode.podcastId)
+            return episodeItem(episode, podcast, playable = true)
+        }
+        val entry = playlists.current().entry(mediaId) ?: return null
+        return MediaItem.Builder()
+            .setMediaId(entry.episodeKey)
+            .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
+            .setMimeType("audio/mpeg")
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(entry.title.ifBlank { "Folge" })
+                    .setArtist(entry.podcastTitle)
+                    .setIsPlayable(true)
+                    .setIsBrowsable(false)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+                    .build(),
+            )
+            .build()
+    }
+
+    private suspend fun playlistItems(): List<MediaItem> {
+        val items = playlists.current().items
+        if (items.isEmpty()) {
+            return listOf(note("empty-playlist", "Keine Playlist", "Am Telefon ein Datum wählen."))
+        }
+        return items.map { entry ->
+            MediaItem.Builder()
+                .setMediaId(entry.episodeKey)
+                .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
+                .setMimeType("audio/mpeg")
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(entry.title.ifBlank { "Folge" })
+                        .setArtist(entry.podcastTitle)
+                        .setIsPlayable(true)
+                        .setIsBrowsable(false)
+                        .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+                        .build(),
+                )
+                .build()
+        }
+    }
+
+    private fun localOrRemote(episodeKey: String, remote: String): Uri {
+        val local = downloads.existingFile(episodeKey)
+        return if (local != null) Uri.fromFile(local) else Uri.parse(remote)
     }
 
     private suspend fun continueItems(): List<MediaItem> {
@@ -109,7 +161,7 @@ class LibraryBrowser @Inject constructor(
     ): MediaItem {
         val builder = MediaItem.Builder()
             .setMediaId(episode.episodeKey)
-            .setUri(episode.enclosureUrl)
+            .setUri(localOrRemote(episode.episodeKey, episode.enclosureUrl))
             .setMimeType(episode.mimeType ?: "audio/mpeg")
         val metadata = MediaMetadata.Builder()
             .setTitle(episode.title)
@@ -169,6 +221,7 @@ object LibraryIds {
     const val ROOT = "root"
     const val CONTINUE = "continue"
     const val SUBSCRIPTIONS = "subscriptions"
+    const val PLAYLIST = "playlist"
 
     fun podcast(id: String): String = "pod:" + URLEncoder.encode(id, Charsets.UTF_8.name())
 
@@ -178,5 +231,6 @@ object LibraryIds {
     }
 
     fun isFolder(mediaId: String): Boolean =
-        mediaId == ROOT || mediaId == CONTINUE || mediaId == SUBSCRIPTIONS || mediaId.startsWith("pod:") || mediaId.startsWith("empty")
+        mediaId == ROOT || mediaId == CONTINUE || mediaId == SUBSCRIPTIONS || mediaId == PLAYLIST ||
+            mediaId.startsWith("pod:") || mediaId.startsWith("empty")
 }

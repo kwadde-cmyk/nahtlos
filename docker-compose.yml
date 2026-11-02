@@ -5,7 +5,8 @@ services:
       context: .
       dockerfile: server/Dockerfile
     ports:
-      - "8787:8787"
+      # Host-Port für Nginx Proxy Manager. Im Container bleibt der Dienst auf 8787.
+      - "${NAHTLOS_PORT:-8787}:8787"
     environment:
       PORT: "8787"
       SYNC_DB: /data/sync.db

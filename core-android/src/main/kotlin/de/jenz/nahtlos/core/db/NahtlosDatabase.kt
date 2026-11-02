@@ -10,8 +10,10 @@ import androidx.room.RoomDatabase
         ProgressEntity::class,
         OutboxEntity::class,
         PendingUnsubEntity::class,
+        PlaylistDocEntity::class,
+        DownloadEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class NahtlosDatabase : RoomDatabase() {
@@ -20,4 +22,6 @@ abstract class NahtlosDatabase : RoomDatabase() {
     abstract fun progress(): ProgressDao
     abstract fun outbox(): OutboxDao
     abstract fun pendingUnsub(): PendingUnsubDao
+    abstract fun playlist(): PlaylistDao
+    abstract fun downloads(): DownloadDao
 }

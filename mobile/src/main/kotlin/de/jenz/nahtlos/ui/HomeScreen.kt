@@ -22,8 +22,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Pause
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import android.net.Uri
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -119,6 +128,18 @@ class HomeViewModel @Inject constructor(
     fun togglePlayback() {
         player.toggle()
     }
+
+    fun importOpml(xml: String, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val count = runCatching { sync.importOpml(xml) }.getOrElse {
+                onDone(it.message ?: "OPML konnte nicht gelesen werden")
+                return@launch
+            }
+            onDone("$count Feeds aus der OPML-Datei übernommen")
+        }
+    }
+
+    suspend fun exportOpml(): String = feeds.exportOpml()
 }
 
 sealed interface SubscribeState {
@@ -133,6 +154,7 @@ fun HomeScreen(
     onOpenPodcast: (String) -> Unit,
     onOpenPlayer: (String?) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenPlaylist: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val podcasts by viewModel.podcasts.collectAsStateWithLifecycle()
@@ -140,12 +162,39 @@ fun HomeScreen(
     val status by viewModel.syncStatus.collectAsStateWithLifecycle()
     val subscribe by viewModel.subscribe.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
+    var banner by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val importOpml = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val text = context.contentResolver.openInputStream(uri)?.use { input ->
+            BufferedReader(InputStreamReader(input)).readText()
+        }.orEmpty()
+        viewModel.importOpml(text) { banner = it }
+    }
+    val exportOpml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val xml = viewModel.exportOpml()
+            context.contentResolver.openOutputStream(uri)?.use { it.write(xml.toByteArray()) }
+            banner = "OPML exportiert"
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Nahtlos") },
                 actions = {
+                    IconButton(onClick = onOpenPlaylist) {
+                        Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist")
+                    }
+                    IconButton(onClick = { importOpml.launch(arrayOf("text/*", "application/xml", "application/octet-stream")) }) {
+                        Icon(Icons.Filled.Add, contentDescription = "OPML importieren")
+                    }
+                    IconButton(onClick = { exportOpml.launch("nahtlos.opml") }) {
+                        Icon(Icons.Filled.Upload, contentDescription = "OPML exportieren")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Einstellungen")
                     }
@@ -164,6 +213,9 @@ fun HomeScreen(
                 .fillMaxSize()
                 .widthIn(max = 840.dp),
         ) {
+            banner?.let { text ->
+                Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            }
             StatusBanner(status) { viewModel.onForeground() }
             when {
                 status.syncing && podcasts.isEmpty() && continueRows.isEmpty() -> LoadingState("Abos werden geholt …")

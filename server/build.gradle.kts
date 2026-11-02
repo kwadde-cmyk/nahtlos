@@ -28,6 +28,7 @@ dependencies {
     implementation(libs.ktor.serialization.json)
     implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.server.status.pages)
+    implementation(libs.ktor.server.forwarded)
     implementation(libs.sqlite.jdbc)
     implementation(libs.logback)
 

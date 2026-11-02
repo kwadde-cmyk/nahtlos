@@ -2,11 +2,14 @@ package de.jenz.nahtlos.server
 
 import de.jenz.nahtlos.model.ErrorBody
 import de.jenz.nahtlos.model.EpisodeProgress
+import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.ProgressBatchRequest
 import de.jenz.nahtlos.model.ProgressBatchResponse
 import de.jenz.nahtlos.model.Subscription
 import de.jenz.nahtlos.model.SyncEvent
-import de.jenz.nahtlos.model.NahtlosJson
+import de.jenz.nahtlos.opml.Opml
+import de.jenz.nahtlos.opml.OpmlOutline
+import de.jenz.nahtlos.playlist.ListeningPlaylist
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -15,11 +18,15 @@ import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.http.ContentType
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.forwardedheaders.XForwardedHeaders
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -59,8 +66,9 @@ fun Application.module(
     clock: () -> Long = { System.currentTimeMillis() },
 ) {
     val hub = ProgressHub()
+    install(XForwardedHeaders)
     install(ContentNegotiation) { json(NahtlosJson.json) }
-    install(WebSockets)
+    install(WebSockets) { pingPeriodMillis = 25_000 }
     install(StatusPages) {
         exception<IllegalArgumentException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ErrorBody(cause.message ?: "Ungültige Anfrage"))
@@ -94,6 +102,32 @@ fun Application.module(
                 require(body.title.isNotBlank()) { "title fehlt" }
                 val stored = body.copy(feedUrl = feedUrl.trimEnd('/'), title = body.title.trim(), updatedAt = clock())
                 database.upsertSubscription(stored, stored.updatedAt)
+                call.respond(stored)
+            }
+
+            get("/subscriptions/opml") {
+                val outlines = database.listSubscriptions().map { OpmlOutline(it.title, it.feedUrl) }
+                call.respondText(Opml.write("Nahtlos", outlines), ContentType.Application.Xml)
+            }
+
+            put("/subscriptions/opml") {
+                val raw = call.receiveText()
+                val xml = if (raw.trimStart().startsWith("{")) {
+                    NahtlosJson.json.decodeFromString<OpmlBody>(raw).opml
+                } else {
+                    raw
+                }
+                val outlines = Opml.parse(xml)
+                require(outlines.isNotEmpty()) { "Keine Feeds in der OPML-Datei" }
+                val stored = outlines.map { outline ->
+                    val subscription = Subscription(
+                        feedUrl = outline.feedUrl.trimEnd('/'),
+                        title = outline.title.ifBlank { outline.feedUrl },
+                        updatedAt = clock(),
+                    )
+                    database.upsertSubscription(subscription, subscription.updatedAt)
+                    subscription
+                }
                 call.respond(stored)
             }
 
@@ -142,6 +176,24 @@ fun Application.module(
                 call.respond(ProgressBatchResponse(results))
             }
 
+            get("/playlist") {
+                call.respond(database.getPlaylist() ?: ListeningPlaylist())
+            }
+
+            put("/playlist") {
+                val incoming = call.receive<ListeningPlaylist>()
+                val error = incoming.validationError()
+                if (error != null) {
+                    call.respond(HttpStatusCode.BadRequest, ErrorBody(error))
+                    return@put
+                }
+                val result = database.applyPlaylist(incoming, clock())
+                if (result.changed) {
+                    hub.broadcast(SyncEvent(SyncEvent.TYPE_PLAYLIST, playlist = result.response.stored))
+                }
+                call.respond(result.response)
+            }
+
             webSocket("/stream") {
                 hub.register(this)
                 try {
@@ -173,6 +225,9 @@ private suspend fun io.ktor.server.routing.RoutingContext.gpodderNotImplemented(
         ),
     )
 }
+
+@kotlinx.serialization.Serializable
+private data class OpmlBody(val opml: String)
 
 private fun bearerToken(header: String?): String? {
     if (header.isNullOrBlank()) return null

@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +31,7 @@ class RealtimeSync @Inject constructor(
     private val settings: SettingsStore,
     private val okHttp: OkHttpClient,
     private val outboxWork: OutboxWork,
+    private val downloads: DownloadScheduler,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var started = false
@@ -38,6 +40,8 @@ class RealtimeSync @Inject constructor(
         if (started) return
         started = true
         outboxWork.schedule()
+        downloads.ensureCleanup()
+        downloads.enqueue()
         val manager = context.getSystemService(ConnectivityManager::class.java)
         runCatching {
             manager.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {

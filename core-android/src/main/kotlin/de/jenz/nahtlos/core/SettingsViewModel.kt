@@ -25,6 +25,9 @@ data class SettingsUi(
     val syncing: Boolean = false,
     val lastSyncAt: Long? = null,
     val bufferAheadMinutes: Int = PlaybackCachePolicy.DEFAULT_AHEAD_MINUTES,
+    val downloadOnUnmeteredOnly: Boolean = true,
+    val downloadLimitMb: Int = 2048,
+    val deletePlayedAfterHours: Int = 24,
     val message: String? = null,
     val messageIsError: Boolean = false,
 )
@@ -44,19 +47,37 @@ class SettingsViewModel @Inject constructor(
             syncing = status.syncing,
             lastSyncAt = status.lastSyncAt,
             bufferAheadMinutes = stored.bufferAheadMinutes,
+            downloadOnUnmeteredOnly = stored.downloadOnUnmeteredOnly,
+            downloadLimitMb = stored.downloadLimitMb,
+            deletePlayedAfterHours = stored.deletePlayedAfterHours,
             message = status.lastError,
             messageIsError = status.lastError != null,
         )
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        settings.read().let { SettingsUi(deviceId = it.deviceId, bufferAheadMinutes = it.bufferAheadMinutes) },
+        settings.read().let {
+            SettingsUi(
+                deviceId = it.deviceId,
+                bufferAheadMinutes = it.bufferAheadMinutes,
+                downloadOnUnmeteredOnly = it.downloadOnUnmeteredOnly,
+                downloadLimitMb = it.downloadLimitMb,
+                deletePlayedAfterHours = it.deletePlayedAfterHours,
+            )
+        },
     )
 
     private val _notice = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val notice: SharedFlow<String> = _notice.asSharedFlow()
 
-    fun save(serverUrl: String, token: String, bufferAheadMinutes: Int) {
+    fun save(
+        serverUrl: String,
+        token: String,
+        bufferAheadMinutes: Int,
+        downloadOnUnmeteredOnly: Boolean,
+        downloadLimitMb: Int,
+        deletePlayedAfterHours: Int,
+    ) {
         val trimmed = serverUrl.trim()
         val urlOk = trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")
         val current = settings.read()
@@ -64,19 +85,36 @@ class SettingsViewModel @Inject constructor(
             serverUrl = if (urlOk) trimmed else current.serverUrl,
             token = if (urlOk) token else current.token,
             bufferAheadMinutes = bufferAheadMinutes,
+            downloadOnUnmeteredOnly = downloadOnUnmeteredOnly,
+            downloadLimitMb = downloadLimitMb,
+            deletePlayedAfterHours = deletePlayedAfterHours,
         )
     }
 
-    fun test(serverUrl: String, token: String, bufferAheadMinutes: Int) {
-        save(serverUrl, token, bufferAheadMinutes)
+    fun test(
+        serverUrl: String,
+        token: String,
+        bufferAheadMinutes: Int,
+        downloadOnUnmeteredOnly: Boolean,
+        downloadLimitMb: Int,
+        deletePlayedAfterHours: Int,
+    ) {
+        save(serverUrl, token, bufferAheadMinutes, downloadOnUnmeteredOnly, downloadLimitMb, deletePlayedAfterHours)
         viewModelScope.launch {
             val message = runCatching { sync.testConnection() }.getOrElse { it.message ?: "Nicht erreichbar" }
             _notice.emit(message)
         }
     }
 
-    fun syncNow(serverUrl: String, token: String, bufferAheadMinutes: Int) {
-        save(serverUrl, token, bufferAheadMinutes)
+    fun syncNow(
+        serverUrl: String,
+        token: String,
+        bufferAheadMinutes: Int,
+        downloadOnUnmeteredOnly: Boolean,
+        downloadLimitMb: Int,
+        deletePlayedAfterHours: Int,
+    ) {
+        save(serverUrl, token, bufferAheadMinutes, downloadOnUnmeteredOnly, downloadLimitMb, deletePlayedAfterHours)
         viewModelScope.launch {
             sync.pullAndMerge(force = true)
         }
