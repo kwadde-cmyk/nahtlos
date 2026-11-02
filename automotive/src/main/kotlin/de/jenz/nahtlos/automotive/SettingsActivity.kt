@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.automotive
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -43,9 +45,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
@@ -76,7 +81,12 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
     val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    val context = LocalContext.current
+    var crash by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+        crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
+    }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { snackbar.showSnackbar(it) }
     }
@@ -153,6 +163,37 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
             )
             state.message?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)
+            if (crash.isNullOrBlank()) {
+                Text(
+                    "Keiner protokolliert.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                SelectionContainer {
+                    Text(
+                        crash.orEmpty(),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 8,
+                    )
+                }
+                Row {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Absturz")
+                            putExtra(Intent.EXTRA_TEXT, crash)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Absturzbericht teilen"))
+                    }) { Text("Teilen") }
+                    androidx.compose.material3.TextButton(onClick = {
+                        CrashLog.clear(context)
+                        crash = null
+                    }) { Text("Löschen") }
+                }
             }
             Spacer(Modifier.height(20.dp))
             Button(

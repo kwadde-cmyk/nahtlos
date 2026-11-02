@@ -9,9 +9,11 @@ import de.jenz.nahtlos.core.db.toModel
 import de.jenz.nahtlos.core.db.toOutbox
 import de.jenz.nahtlos.core.db.toProgressEntity
 import de.jenz.nahtlos.core.db.toSubscription
+import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.opml.Opml
+import de.jenz.nahtlos.opml.OpmlOutline
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.model.EpisodeProgress
 import de.jenz.nahtlos.model.ProgressStatus
@@ -19,6 +21,7 @@ import de.jenz.nahtlos.model.SyncEvent
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.sync.OutboxPlanner
 import de.jenz.nahtlos.sync.ProgressResolver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +54,7 @@ class SyncRepository @Inject constructor(
     private val settings: SettingsStore,
     private val feeds: FeedRepository,
     private val outboxWork: OutboxWork,
+    private val feedRefresh: FeedRefreshWork,
     private val playlists: PlaylistRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -94,12 +98,14 @@ class SyncRepository @Inject constructor(
             try {
                 pushSubscriptionChanges(current)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = explain(e)
                 Log.w(TAG, "Abo-Sync fehlgeschlagen", e)
             }
             try {
                 reconcileSubscriptions(current)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = explain(e)
                 Log.w(TAG, "Abo-Abruf fehlgeschlagen", e)
             }
@@ -109,6 +115,7 @@ class SyncRepository @Inject constructor(
                 playlists.dropRemotelyFinished()
                 lastPullAt = System.currentTimeMillis()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = explain(e)
                 Log.w(TAG, "Positions-Sync fehlgeschlagen", e)
             }
@@ -124,15 +131,27 @@ class SyncRepository @Inject constructor(
 
     suspend fun importOpml(xml: String): Int {
         val outlines = Opml.parse(xml)
-        for (outline in outlines) feeds.rememberFeed(outline.feedUrl, outline.title)
+        val count = feeds.rememberOutlines(outlines)
         val current = settings.read()
         if (current.configured) {
-            runCatching { api.putOpml(current, xml) }
-            runCatching { pushSubscriptionChanges(current) }
-                .onFailure { error -> _status.update { it.copy(lastError = explain(error)) } }
+            try {
+                api.putOpml(current, xml)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (error: Exception) {
+                _status.update { it.copy(lastError = explain(error)) }
+            }
+            try {
+                pushSubscriptionChanges(current)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (error: Exception) {
+                _status.update { it.copy(lastError = explain(error)) }
+            }
         }
         scheduleFlush()
-        return outlines.size
+        feedRefresh.schedule()
+        return count
     }
 
     suspend fun testConnection(): String {
@@ -296,13 +315,17 @@ class SyncRepository @Inject constructor(
         val remote = api.getSubscriptions(current)
         val remoteUrls = remote.map { EpisodeKeys.normalizeFeedUrl(it.feedUrl) }.toSet()
         val pendingDeletes = db.pendingUnsub().all().map { it.feedUrl }.toSet()
+        val missing = mutableListOf<OpmlOutline>()
         for (subscription in remote) {
             val url = EpisodeKeys.normalizeFeedUrl(subscription.feedUrl)
             if (url in pendingDeletes) continue
             if (db.podcasts().byFeedUrl(url) == null) {
-                runCatching { feeds.subscribe(url, markNeedsSync = false) }
-                    .onFailure { error -> Log.w(TAG, "Feed $url nicht geladen", error) }
+                missing += OpmlOutline(subscription.title, url)
             }
+        }
+        if (missing.isNotEmpty()) {
+            feeds.rememberOutlines(missing)
+            feedRefresh.schedule()
         }
         for (podcast in db.podcasts().all()) {
             if (podcast.needsSync) continue
@@ -331,8 +354,15 @@ class SyncRepository @Inject constructor(
         val remote = try {
             api.getAllProgress(current)
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
             // Upload anyway. The server still applies last-write-wins if the GET was the part that failed.
-            runCatching { flushOutbox(current) }
+            try {
+                flushOutbox(current)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The original GET failure is what the caller sees.
+            }
             throw error
         }
         val remoteByKey = remote.associateBy { it.episodeKey }

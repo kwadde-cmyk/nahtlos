@@ -101,7 +101,13 @@ class SettingsViewModel @Inject constructor(
     ) {
         save(serverUrl, token, bufferAheadMinutes, downloadOnUnmeteredOnly, downloadLimitMb, deletePlayedAfterHours)
         viewModelScope.launch {
-            val message = runCatching { sync.testConnection() }.getOrElse { it.message ?: "Nicht erreichbar" }
+            val message = try {
+                sync.testConnection()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error.message ?: "Nicht erreichbar"
+            }
             _notice.emit(message)
         }
     }

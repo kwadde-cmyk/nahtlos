@@ -32,6 +32,21 @@ interface PodcastDao {
     @Query("UPDATE podcasts SET needsSync = :needsSync WHERE id = :id")
     suspend fun setNeedsSync(id: String, needsSync: Boolean)
 
+    @Query("UPDATE podcasts SET refreshStatus = :status, refreshError = :error WHERE id = :id")
+    suspend fun setRefresh(id: String, status: String, error: String?)
+
+    @Query("SELECT * FROM podcasts WHERE refreshStatus = 'PENDING'")
+    suspend fun pending(): List<PodcastEntity>
+
+    @Query("UPDATE podcasts SET refreshStatus = 'PENDING', refreshError = NULL WHERE refreshStatus = 'LOADING'")
+    suspend fun requeueInterrupted()
+
+    @Query("UPDATE podcasts SET refreshStatus = 'PENDING', refreshError = NULL WHERE refreshStatus = 'FAILED'")
+    suspend fun requeueFailed()
+
+    @Query("UPDATE podcasts SET refreshStatus = 'PENDING', refreshError = NULL WHERE id = :id")
+    suspend fun requeue(id: String)
+
     @Query("DELETE FROM podcasts WHERE id = :id")
     suspend fun delete(id: String)
 }

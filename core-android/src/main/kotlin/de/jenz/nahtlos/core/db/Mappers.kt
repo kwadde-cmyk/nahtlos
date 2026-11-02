@@ -14,10 +14,15 @@ import kotlinx.serialization.encodeToString
 
 private val json = NahtlosJson.json
 
-fun ParsedFeed.toPodcast(feedUrl: String, needsSync: Boolean, fetchedAt: Long): PodcastEntity {
+fun ParsedFeed.toPodcast(
+    feedUrl: String,
+    needsSync: Boolean,
+    fetchedAt: Long,
+    existingId: String? = null,
+): PodcastEntity {
     val normalized = EpisodeKeys.normalizeFeedUrl(feedUrl)
     return PodcastEntity(
-        id = EpisodeKeys.podcastId(podcastGuid, normalized),
+        id = existingId ?: EpisodeKeys.podcastId(podcastGuid, normalized),
         feedUrl = normalized,
         title = title,
         description = description,

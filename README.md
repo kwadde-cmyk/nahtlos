@@ -57,7 +57,7 @@ Beide Geräte brauchen eine brauchbare Uhr. Die Client-Zeit ist die Autorität. 
 
 ### Podcasting 2.0 im MVP
 
-Der Parser liest aus dem RSS-Feed:
+Der Parser liest aus dem RSS-Feed, als Stream (Woodstox/StAX, kein DOM über das ganze Dokument):
 
 - `podcast:guid` am Channel
 - GUID und Enclosure der Folge
@@ -65,6 +65,12 @@ Der Parser liest aus dem RSS-Feed:
 - `podcast:transcript` (URL, Typ, Sprache) — im Player als Link, kein eingebauter Reader
 - `podcast:chapters` als URL plus Podlove Simple Chapters (`psc:chapter`) inline
 - die Kapitel-JSON-Datei (`application/json+chapters`) wird beim Öffnen des Players nachgeladen
+
+Ein OPML-Import schreibt sofort nur Titel und Feed-URL, lädt die OPML wie bisher auf den Server und antwortet mit „36 Feeds übernommen, lade Folgen…“. Die Folgen holt WorkManager danach im Hintergrund (`nahtlos-feed-refresh`), auch wenn man den Screen verlässt: höchstens vier Feeds gleichzeitig, 45 Sekunden pro Feed, ein fehlerhafter Feed bricht die anderen nicht ab. Die Bibliothek zeigt `x/36`. Fehlgeschlagene Feeds sind markiert und lassen sich einzeln oder gesammelt erneut laden.
+
+Pro Abruf bleiben nur die **neuesten 200 Folgen** (`RssFeedParser.MAX_EPISODES_PER_REFRESH`). Ältere Folgen, die schon in der Datenbank stehen, werden nicht gelöscht. Die Playlist „seit Datum“ sieht nur gespeicherte Folgen: liegt das Startdatum vor der ältesten gespeicherten Folge eines langen Feeds, fehlen die noch älteren. Der Deckel ist der Unterschied zwischen dem Hopp-Export (36 Feeds, zusammen 43 MB XML, 7991 Folgen, allein Einundzwanzig 4,0 MB und 682 Folgen) und einem Import, der auf dem Handy durchläuft.
+
+Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Unter Einstellungen lässt er sich lesen, teilen und löschen.
 
 ### AAOS
 
@@ -190,13 +196,19 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 
 ## Tests
 
-`core-model` prüft Last-Write-Wins, die Playlist (Datum, Sortierung, Refresh, Reihenfolge, Autoplay-Nachbar, Entfernen fertiger Folgen), die Download-Frist und das Speicherlimit, OPML, die Outbox-Planung, die Cache-Größe, den RSS-Parser und die gPodder-Sekundenabbildung. `server` prüft Token, Positionen, Playlist-Sync, OPML-Import und den WebSocket.
+`core-model` prüft Last-Write-Wins, die Playlist (Datum, Sortierung, Refresh, Reihenfolge, Autoplay-Nachbar, Entfernen fertiger Folgen), die Download-Frist und das Speicherlimit, OPML (inkl. Hopp- und Pocket-Casts-Export), die Outbox-Planung, die Cache-Größe, den RSS-Parser und die gPodder-Sekundenabbildung. Der Import-Benchmark parst den aufgezeichneten Einundzwanzig-Feed (gzip unter `core-model/src/test/resources/feeds/`) mit und ohne 200er-Deckel und druckt Laufzeit, allokierte und behaltene Bytes. `server` prüft Token, Positionen, Playlist-Sync, OPML-Import und den WebSocket.
 
-Nicht gelaufen: Android-Emulator, AAOS-Emulator, ein echter Tunnel, instrumentierte Tests, `docker compose` in dieser Umgebung nur als Bauanleitung. `./gradlew assembleDebug` baut beide APKs.
+`ImportOnDeviceTest` in `core-android` macht dasselbe auf einem Android-Gerät: aufgezeichneten Feed parsen, beide OPML-Dateien nur als Titel speichern, ohne einen Request abzusetzen. Start mit einem laufenden Emulator oder Handy:
+
+```bash
+./gradlew :core-android:connectedDebugAndroidTest
+```
+
+`docker compose` ist in dieser Umgebung nur die Bauanleitung. `./gradlew assembleDebug` baut beide APKs.
 
 ## Was diese Version kann
 
-- RSS per URL abonnieren, Folgen listen, streamen, OPML importieren und exportieren
+- RSS per URL abonnieren, Folgen listen, streamen, OPML importieren (sofort die Abos, Folgen im Hintergrund) und exportieren
 - Playlist „alles seit Datum“ mit Sortierung, Umsortieren, Entfernen, Sync aufs Auto und Autoplay der nächsten Folge
 - Automatischer Download der Playlist je Gerät (WLAN-Wunsch und Speicherlimit), lokale Datei vor Stream
 - Fertige Downloads nach einer Wartezeit löschen (Standard 24 Stunden) und optional aus der Playlist nehmen
