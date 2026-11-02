@@ -10,7 +10,7 @@
 
     <application>
         <service
-            android:name="de.jenz.weiterhoeren.core.playback.PodcastMediaLibraryService"
+            android:name="de.jenz.nahtlos.core.playback.PodcastMediaLibraryService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>

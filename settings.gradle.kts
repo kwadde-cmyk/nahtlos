@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "weiterhoeren"
+rootProject.name = "nahtlos"
 
 include(":core-model")
 include(":server")

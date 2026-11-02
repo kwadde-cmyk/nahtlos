@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Weiterhoeren" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.Nahtlos" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/window_background</item>
         <item name="android:windowBackground">@color/window_background</item>

@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "de.jenz.weiterhoeren.core"
+    namespace = "de.jenz.nahtlos.core"
     compileSdk = 35
     defaultConfig {
         minSdk = 26
@@ -34,6 +34,9 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    implementation(libs.media3.datasource)
+    implementation(libs.media3.database)
+    implementation(libs.work.runtime)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)

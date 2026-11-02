@@ -1,5 +1,6 @@
 services:
-  sync:
+  nahtlos:
+    image: nahtlos:local
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -10,8 +11,8 @@ services:
       SYNC_DB: /data/sync.db
       SYNC_TOKEN: ${SYNC_TOKEN:-dev-token-change-me}
     volumes:
-      - sync-data:/data
+      - nahtlos-data:/data
     restart: unless-stopped
 
 volumes:
-  sync-data:
+  nahtlos-data:

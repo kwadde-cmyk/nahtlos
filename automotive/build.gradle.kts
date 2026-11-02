@@ -7,10 +7,10 @@ plugins {
 }
 
 android {
-    namespace = "de.jenz.weiterhoeren.automotive"
+    namespace = "de.jenz.nahtlos.automotive"
     compileSdk = 35
     defaultConfig {
-        applicationId = "de.jenz.weiterhoeren.automotive"
+        applicationId = "de.jenz.nahtlos.automotive"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

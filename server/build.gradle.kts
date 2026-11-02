@@ -17,7 +17,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("de.jenz.weiterhoeren.server.MainKt")
+    mainClass.set("de.jenz.nahtlos.server.MainKt")
 }
 
 dependencies {

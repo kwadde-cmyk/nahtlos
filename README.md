@@ -1,4 +1,4 @@
-# Weiterhören
+# Nahtlos
 
 Self-hosted Podcast-App für das Android-Telefon und für Android Automotive OS (AAOS, das eingebaute Infotainment). Android Auto (Projektion) ist kein Ziel.
 
@@ -18,8 +18,8 @@ AAOS (Media3)  ──PUT/GET──────┘
 
 | Modul | Rolle |
 | --- | --- |
-| `core-model` | Reines Kotlin: Feed-Parser, Episoden-Schlüssel, Last-Write-Wins, Outbox-Plan |
-| `core-android` | Room, OkHttp-Sync, Outbox, `MediaLibraryService` (Media3) |
+| `core-model` | Reines Kotlin: Feed-Parser, Episoden-Schlüssel, Last-Write-Wins, Outbox-Plan, Cache-Größe |
+| `core-android` | Room, OkHttp-Sync, Outbox, WorkManager, Media3-Cache, `MediaLibraryService` |
 | `mobile` | Jetpack-Compose-App: RSS abonnieren, Folgen, Player, Server-Einstellungen |
 | `automotive` | AAOS-Media-App plus geparkter Einrichtungs-Screen |
 | `server` | Self-hosted Sync: Abos, Positionen, WebSocket |
@@ -41,7 +41,15 @@ Auslöser für den Upload: Pause, Stop, Seek, Ende, etwa alle 15 Sekunden währe
 
 Auslöser für den Download: Start des Media-Dienstes, App wieder im Vordergrund, sobald das Netz kommt. Vor dem Abspielen wartet der Dienst höchstens 1,5 Sekunden auf den Server und fällt sonst auf die lokale Position zurück.
 
-Offline: die Position landet in einer Room-Outbox. Liegt das Netz wieder an und der Prozess lebt, wird sie hochgeladen. War der Prozess tot, passiert das beim nächsten Start von App oder Media-Session. Eine ältere lokale Position überschreibt nie einen neueren Server-Stand; lehnt der Server ab, übernimmt der Client das gespeicherte Dokument.
+Offline: die Position landet in einer Room-Outbox. Liegt das Netz wieder an und der Prozess lebt, wird sie hochgeladen. Zusätzlich plant WorkManager einen eindeutigen Job mit Netz-Constraint (`nahtlos-outbox-flush`). Der Job überlebt das Beenden der App und schickt die Position, sobald das Netz da ist — auch wenn niemand die App wieder öffnet. Eine ältere lokale Position überschreibt nie einen neueren Server-Stand; lehnt der Server ab, übernimmt der Client das gespeicherte Dokument.
+
+### Wiedergabe-Cache
+
+Es gibt keine Folgen-Downloads. Stattdessen puffert Media3 über `CacheDataSource` und `SimpleCache` (LRU im App-Cache). Der Load-Controller liest voraus, bis das eingestellte Fenster voll ist, standardmäßig 10 Minuten, einstellbar von 2 bis 30. Die Wiedergabe startet nach etwa einer Sekunde, nicht erst nach dem ganzen Fenster. Ein Rücksprung von 15 oder 30 Sekunden bleibt aus dem Cache bedient, solange die Stelle schon geladen wurde.
+
+Die Größe rechnet `PlaybackCachePolicy` mit 320 kbit/s: der RAM-Deckel liegt etwas über diesem Fenster (höchstens 64 MB), der Disk-Cache fasst drei solcher Fenster (mindestens 64 MB, höchstens 512 MB). Leisere Feeds passen zeitlich vollständig hinein. Deutlich höhere Bitraten können den Byte-Deckel vor der vollen Minutenzahl erreichen.
+
+Auf AAOS bereitet der Media-Dienst beim Start die Folge aus „Weitermachen“ vor, ohne sie abzuspielen, sofern Netz da ist. Damit füllt sich der Cache ab der gespeicherten Position, bevor man in ein Funkloch fährt. Die Positions-Outbox läuft davon unabhängig weiter.
 
 Episoden-Identität ist `podcast:guid` plus GUID der Folge. Die Enclosure-URL ist nur der Fallback, weil CDN-Links sich ändern.
 
@@ -60,7 +68,7 @@ Der Parser liest aus dem RSS-Feed:
 
 ### AAOS
 
-`automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weiterhören, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet.
+`automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weitermachen, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`.
 
 Ohne Server-URL und Token liefert die Automotive-App einen leeren Baum mit der Aktion „Server einrichten“. Der Einrichtungs-Screen ist eine normale Activity ohne `distractionOptimized` und damit nur im Parkzustand benutzbar.
 
@@ -95,7 +103,7 @@ export SYNC_TOKEN=ein-langes-geheimnis
 docker compose up --build
 ```
 
-Der Dienst lauscht auf Port 8787, die Datenbank liegt im Volume unter `/data/sync.db`.
+Der Dienst heißt im Compose-File `nahtlos`, das Image `nahtlos:local`. Er lauscht auf Port 8787, die Datenbank liegt im Volume unter `/data/sync.db`.
 
 Ohne Docker, mit JDK 17 oder 21:
 
@@ -158,41 +166,40 @@ AAOS-Emulator (Android Studio Device Manager, Automotive, z. B. 1024p landscape,
 adb install -r automotive/build/outputs/apk/debug/automotive-debug.apk
 ```
 
-Im geparkten Zustand „Weiterhören Auto“ öffnen und dieselbe URL und denselben Token eintragen. Im Emulator ist der Host `http://10.0.2.2:8787`. Danach erscheint die App im Media-Center mit Weiterhören, Abonnements und Folgen. Play zieht vorher die letzte Position.
+Im geparkten Zustand „Nahtlos Auto“ öffnen und dieselbe URL, denselben Token und bei Bedarf den Puffer eintragen. Im Emulator ist der Host `http://10.0.2.2:8787`. Danach erscheint die App im Media-Center mit Weitermachen, Abonnements und Folgen. Ist Netz da, wird die aktuelle Folge schon beim Start der Media-Session in den Cache geladen. Play zieht vorher die letzte Position.
 
 Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-Modellen, sonst oft nur der Play-Automotive-Track). Das ist hier nicht ausprobiert.
 
 ## Tests
 
-`core-model` prüft Last-Write-Wins, die Outbox-Planung, den RSS-Parser (GUID, Personen, Transkript, Kapitel-URL, Podlove-Kapitel) und die gPodder-Sekundenabbildung. `server` prüft Token, Roundtrip, älteren Schreibvorgang, späteren Rücksprung, Batch, Abos und den WebSocket.
+`core-model` prüft Last-Write-Wins, die Outbox-Planung, die Cache-Größe (10 Minuten, Bitrate, LRU-Rahmen), den RSS-Parser (GUID, Personen, Transkript, Kapitel-URL, Podlove-Kapitel) und die gPodder-Sekundenabbildung. `server` prüft Token, Roundtrip, älteren Schreibvorgang, späteren Rücksprung, Batch, Abos und den WebSocket.
 
-Nicht gelaufen: Android-Emulator, AAOS-Emulator, instrumentierte Tests, `docker compose` in dieser Umgebung nur als Bauanleitung. `./gradlew assembleDebug` baut beide APKs.
+Nicht gelaufen: Android-Emulator, AAOS-Emulator, ein echter Tunnel, instrumentierte Tests, `docker compose` in dieser Umgebung nur als Bauanleitung. `./gradlew assembleDebug` baut beide APKs.
 
 ## Was diese Version kann
 
-- RSS per URL abonnieren, Folgen listen, streamen (kein Offline-Audio)
+- RSS per URL abonnieren, Folgen listen, streamen
+- Wiedergabe-Cache für etwa 10 Minuten Funkloch, einstellbar, mit Vorladen der aktuellen Folge im Auto
 - Pause, Seek, ±15/30 Sekunden, Kapitel wenn sie im Feed oder in der Kapiteldatei stehen
 - Position lokal speichern und mit dem Server abgleichen, in beide Richtungen
-- Outbox, Pull beim Session-Start und im Vordergrund, 1,5-Sekunden-Grenze vor dem Play
+- Outbox, WorkManager-Flush, Pull beim Session-Start und im Vordergrund, 1,5-Sekunden-Grenze vor dem Play
 - WebSocket, solange die Verbindung steht; Pull bleibt die Quelle der Wahrheit
 - Browse-Baum und geparkte Einrichtung auf AAOS
 
 ## Was noch nicht da ist
 
-- Downloads und eine echte Offline-Wiedergabe
+- Dauerhafte Downloads einer ganzen Folge (der Cache ist LRU und kann verworfen werden)
 - Up Next / Queue
 - Podcast-Index-Suche
 - Transkript im Player, nur der Link
 - gPodder-kompatible API (bewusst 501)
 - Mehrere Benutzer, Kontoanlage, QR-Kopplung — ein gemeinsames Token
-- WorkManager für einen Flush, wenn der Prozess schon tot ist und niemand die App öffnet
 - Gleichzeitiges Abspielen auf beiden Geräten: Last-Write-Wins, sie „kämpfen“
 - Play-Automotive-Track und OEM-Sideload-Tests
+- Messung des Caches in einem echten Funkloch
 
 ## Nächste Schritte
 
-1. Phone-Emulator und AAOS-Emulator gegeneinander: Pause links, Play rechts, unter zwei Sekunden bei stehendem Netz.
-2. WorkManager mit Netz-Constraint, damit die Outbox auch ohne geöffnete UI rausgeht.
-3. Offline-Downloads der Enclosure, damit der Tunnel nicht die Wiedergabe abreißt.
-4. Kapitel im AAOS-Browse (Seek über die System-UI ist da, eine Kapitelliste im Auto noch nicht).
-5. gPodder-Adapter nur wenn ein bestehendes oPodSync weiterlaufen soll — nicht als Ersatz für diesen Vertrag.
+1. Phone-Emulator und AAOS-Emulator gegeneinander: Pause links, Play rechts, unter zwei Sekunden bei stehendem Netz. Danach Netz trennen und prüfen, ob etwa 10 Minuten weiterlaufen.
+2. Kapitel im AAOS-Browse (Seek über die System-UI ist da, eine Kapitelliste im Auto noch nicht).
+3. gPodder-Adapter nur wenn ein bestehendes oPodSync weiterlaufen soll — nicht als Ersatz für diesen Vertrag.

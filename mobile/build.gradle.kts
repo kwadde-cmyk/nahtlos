@@ -7,10 +7,10 @@ plugins {
 }
 
 android {
-    namespace = "de.jenz.weiterhoeren"
+    namespace = "de.jenz.nahtlos"
     compileSdk = 35
     defaultConfig {
-        applicationId = "de.jenz.weiterhoeren"
+        applicationId = "de.jenz.nahtlos"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
