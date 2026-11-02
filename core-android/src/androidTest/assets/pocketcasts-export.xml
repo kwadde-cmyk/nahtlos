@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<opml version="1.0">
+  <head>
+    <title>Pocket Casts Feeds</title>
+  </head>
+  <body>
+    <outline text="feeds">
+      <outline type="rss" text="Pleb's Taverne" xmlUrl="https://anchor.fm/s/6b8bc084/podcast/rss" />
+      <outline type="rss" text="Bitcoin Optech Podcast" xmlUrl="https://anchor.fm/s/d9918154/podcast/rss" />
+      <outline type="rss" text="Hunde besser verstehen" xmlUrl="https://feeds.soundcloud.com/users/soundcloud:users:1017825130/sounds.rss" />
+      <outline type="rss" text="Bitcoin Audible.DE - Die besten Bitcoin-Artikel, vorgelesen in deutscher Sprache!" xmlUrl="https://casto.bitcoinaudible.de/@BitcoinAudibleDE/feed.xml" />
+      <outline type="rss" text="based." xmlUrl="https://anchor.fm/s/fd4e561c/podcast/rss" />
+      <outline type="rss" text="Dachthekenduett" xmlUrl="https://letscast.fm/podcasts/dachthekenduett-cdcd6a03/feed" />
+      <outline type="rss" text="Blocktrainer Bitcoin Podcast" xmlUrl="https://serve.podhome.fm/rss/9b654631-a45c-58e4-a237-2e8aa65262b8" />
+      <outline type="rss" text="PURE LIGHT - Für Menschen, die innerlich frei sein wollen." xmlUrl="https://anchor.fm/s/e1478a10/podcast/rss" />
+      <outline type="rss" text="Was Bitcoin bringt - mit Niko Jilch" xmlUrl="https://rss.buzzsprout.com/1936624.rss" />
+      <outline type="rss" text="Der Bitcoin Podcast" xmlUrl="https://anchor.fm/s/fc96f0e4/podcast/rss" />
+      <outline type="rss" text="Die Futtertierärztin - Podcast über Ernährung von Hunden und Katzen" xmlUrl="https://futtertieraerztin.podigee.io/feed/mp3" />
+      <outline type="rss" text="Jung Brutal Marktradikal" xmlUrl="https://letscast.fm/podcasts/jung-brutal-marktradikal-fce2c51b/feed" />
+      <outline type="rss" text="SOS - Shield Of Satoshi - Ein Bitcoin Podcast" xmlUrl="https://anchor.fm/s/b141f120/podcast/rss" />
+      <outline type="rss" text="{ungeskriptet} - Der Meinungsfreiheit verpflichtet." xmlUrl="https://feeds.megaphone.fm/UNGESKRIPTETMEDIAGMBH9200557996" />
+      <outline type="rss" text="Bitcoin verstehen" xmlUrl="https://cdn.audiorella.com/podcasts/1862-bitcoin-verstehen/feed.rss" />
+      <outline type="rss" text="Aethervox" xmlUrl="https://xsxm.de/feed/mp3/" />
+      <outline type="rss" text="Make Economy Great Again" xmlUrl="https://make-economy-great.podigee.io/feed/mp3" />
+      <outline type="rss" text="Dezentral &amp; Direkt – mit Joana Cotar und Roman Reher" xmlUrl="https://serve.podhome.fm/rss/c44e77ad-2bc0-47a8-bf30-122fa01c5a92" />
+      <outline type="rss" text="Sound Money Bitcoin Podcast" xmlUrl="https://anchor.fm/s/68a48810/podcast/rss" />
+      <outline type="rss" text="Was KI kann - mit Florian Zsifkovics" xmlUrl="https://rss.buzzsprout.com/2617180.rss" />
+      <outline type="rss" text="AUF AUGENHÖHE" xmlUrl="https://pdkpxj.podcaster.de/fairtalk.rss" />
+      <outline type="rss" text="Münzcrime - True Crime Bitcoin Podcast" xmlUrl="https://serve.podhome.fm/rss/84f0e596-32ff-42bb-a2bc-b610d48bc9d1" />
+      <outline type="rss" text="bto – der Ökonomie-Podcast von Dr. Daniel Stelter" xmlUrl="https://feeds.acast.com/public/shows/649948e4db3d690011987638" />
+      <outline type="rss" text="VORAN APPORT" xmlUrl="https://ppothf.podcaster.de/voran-apport.rss" />
+      <outline type="rss" text="Einundzwanzig, der Bitcoin Podcast" xmlUrl="https://anchor.fm/s/d8d3c38/podcast/rss" />
+      <outline type="rss" text="Die Bitcoin Lesestunde" xmlUrl="https://anchor.fm/s/87f8ca64/podcast/rss" />
+      <outline type="rss" text="Die sogenannte Gegenwart" xmlUrl="https://feeds.simplecast.com/iSy0hk_K" />
+      <outline type="rss" text="Weltanschauung" xmlUrl="https://feed.podbean.com/weltanschauung/feed.xml" />
+      <outline type="rss" text="Heart Money by Nicole" xmlUrl="https://heartmoney.podigee.io/feed/mp3" />
+      <outline type="rss" text="Honigdachs" xmlUrl="https://honigdachs.podigee.io/feed/mp3" />
+      <outline type="rss" text="UnterBlog" xmlUrl="https://anchor.fm/s/10ca9d884/podcast/rss" />
+      <outline type="rss" text="LoKr Room" xmlUrl="https://cdn.julephosting.de/podcasts/1065-lokr-room/feed.rss" />
+      <outline type="rss" text="Münzweg - der Bitcoin-Podcast" xmlUrl="https://serve.podhome.fm/rss/537e4d76-e51c-5a01-a88d-83450d7cf7e8" />
+      <outline type="rss" text="Praxeolog Podcast" xmlUrl="https://anchor.fm/s/95f1b568/podcast/rss" />
+      <outline type="rss" text="Unter Druck Podcast" xmlUrl="https://anchor.fm/s/fe31fd68/podcast/rss" />
+      <outline type="rss" text="Nodesignal - Deine Bitcoin-Frequenz" xmlUrl="https://serve.podhome.fm/rss/e8df0b13-47de-544a-99b7-ec7cbd960a16" />
+    </outline>
+  </body>
+</opml>

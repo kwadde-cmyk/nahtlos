@@ -10,6 +10,7 @@ ktor = "3.0.3"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 okhttp = "4.12.0"
+woodstox = "6.7.0"
 coil = "2.7.0"
 core = "1.15.0"
 activity = "1.9.3"
@@ -21,6 +22,9 @@ sqlite = "3.47.2.0"
 logback = "1.5.6"
 junit = "5.11.4"
 work = "2.10.0"
+zxing = "3.5.3"
+camerax = "1.4.1"
+concurrent = "1.2.0"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -45,6 +49,13 @@ media3-session = { module = "androidx.media3:media3-session", version.ref = "med
 media3-datasource = { module = "androidx.media3:media3-datasource", version.ref = "media3" }
 media3-database = { module = "androidx.media3:media3-database", version.ref = "media3" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+camera-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "concurrent" }
+guava = { module = "com.google.guava:guava", version = "33.3.1-android" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
@@ -52,6 +63,7 @@ coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-androi
 coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutines" }
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+woodstox-core = { module = "com.fasterxml.woodstox:woodstox-core", version.ref = "woodstox" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }

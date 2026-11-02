@@ -14,6 +14,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -59,6 +60,8 @@ class OutboxFlushWorker(
         return try {
             sync.flushPending()
             Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: SyncHttpException) {
             if (error.code in 400..499 || runAttemptCount >= MAX_ATTEMPTS) Result.failure() else Result.retry()
         } catch (_: Exception) {

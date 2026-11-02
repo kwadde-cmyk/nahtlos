@@ -47,9 +47,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.db.EpisodeRow
 import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.db.persons
+import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.sync.SyncRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,8 +81,13 @@ class EpisodesViewModel @Inject constructor(
     fun refresh(force: Boolean) {
         viewModelScope.launch {
             _refreshing.value = true
-            runCatching { feeds.ensureFresh(podcastId, force) }
-                .onFailure { _error.value = it.message }
+            try {
+                feeds.ensureFresh(podcastId, force)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _error.value = error.message
+            }
             _refreshing.value = false
         }
     }
@@ -214,10 +221,12 @@ private fun EpisodeList(
         }
         if (episodes.isEmpty() && !refreshing) {
             item {
-                Text(
-                    "Dieser Feed hat noch keine Folgen mit Audio.",
-                    modifier = Modifier.padding(20.dp),
-                )
+                val message = when (podcast.refreshStatus) {
+                    FeedRefresh.PENDING, FeedRefresh.LOADING -> "Folgen werden geladen."
+                    FeedRefresh.FAILED -> podcast.refreshError ?: "Der Feed konnte nicht geladen werden."
+                    else -> "Dieser Feed hat noch keine Folgen mit Audio."
+                }
+                Text(message, modifier = Modifier.padding(20.dp))
             }
         }
         items(episodes, key = { it.episode.episodeKey }) { row ->

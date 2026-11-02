@@ -152,3 +152,57 @@ data class ParsedFeed(
 )
 
 class FeedParseException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+@Serializable
+data class PairStartResponse(
+    val pairingId: String,
+    val code: String,
+    val expiresIn: Int,
+)
+
+@Serializable
+data class PairApproveRequest(
+    val code: String,
+    val name: String,
+)
+
+@Serializable
+data class PairApproveResponse(
+    val deviceId: String,
+    val name: String,
+)
+
+@Serializable
+data class PairPollResponse(
+    val status: String,
+    val expiresIn: Int? = null,
+    val token: String? = null,
+    val deviceId: String? = null,
+    val name: String? = null,
+) {
+    companion object {
+        const val PENDING = "pending"
+        const val APPROVED = "approved"
+        const val EXPIRED = "expired"
+        const val CONSUMED = "consumed"
+    }
+}
+
+@Serializable
+data class DeviceSummary(
+    val id: String,
+    val name: String,
+    val createdAt: Long,
+    val lastSeenAt: Long? = null,
+    val revoked: Boolean = false,
+)
+
+@Serializable
+data class BootstrapRequest(val name: String)
+
+@Serializable
+data class BootstrapResponse(
+    val id: String,
+    val name: String,
+    val token: String,
+)

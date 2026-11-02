@@ -35,6 +35,7 @@ class FeedParserTest {
         assertEquals(listOf("Intro", "Thema"), episode.chapters.map { it.title })
         assertEquals("Bea", episode.persons.single().name)
         assertEquals("guest", episode.persons.single().role)
+        assertTrue(episode.description.contains("Show notes"))
         assertTrue(episode.publishedAtEpochMs != null && episode.publishedAtEpochMs!! > 0)
 
         val key = EpisodeKeys.episodeKey(feed.podcastGuid, "https://example.com/feed.xml", episode.guid, episode.enclosureUrl)
@@ -57,6 +58,37 @@ class FeedParserTest {
         assertEquals(a, b)
         assertTrue(a.startsWith("feed:"))
         assertTrue(a.contains("|url:"))
+    }
+
+    @Test
+    fun keepsOnlyTheNewestEpisodesWhenCapped() {
+        val xml = buildString {
+            append("<rss version=\"2.0\"><channel><title>Lang</title>")
+            append(item("alt", "https://ex/old.mp3", "Mon, 01 Jan 2024 00:00:00 GMT"))
+            append(item("neu", "https://ex/new.mp3", "Mon, 01 Jun 2026 00:00:00 GMT"))
+            append(item("mitte", "https://ex/mid.mp3", "Wed, 01 Jan 2025 00:00:00 GMT"))
+            append("</channel></rss>")
+        }
+        val feed = parser.parse(xml, maxEpisodes = 2)
+        assertEquals(setOf("neu", "mitte"), feed.episodes.map { it.title }.toSet())
+    }
+
+    @Test
+    fun repairsABareAmpersandWithoutCopyingTheDocument() {
+        val xml = """
+            <rss version="2.0"><channel>
+              <title>AT&T Daily</title>
+              <description>Rock &amp; Roll</description>
+              <item>
+                <title>Folge</title>
+                <enclosure url="https://cdn.example/at.mp3" type="audio/mpeg"/>
+              </item>
+            </channel></rss>
+        """.trimIndent()
+        val feed = parser.parse(xml.reader(), maxEpisodes = 10)
+        assertEquals("AT&T Daily", feed.title)
+        assertTrue(feed.description.contains("Rock & Roll"))
+        assertEquals(1, feed.episodes.size)
     }
 
     @Test
@@ -107,6 +139,9 @@ class FeedParserTest {
     }
 
     private companion object {
+        fun item(title: String, url: String, date: String) =
+            """<item><title>$title</title><pubDate>$date</pubDate><enclosure url="$url" type="audio/mpeg"/></item>"""
+
         val SAMPLE = """
             <?xml version="1.0" encoding="UTF-8"?>
             <rss version="2.0"

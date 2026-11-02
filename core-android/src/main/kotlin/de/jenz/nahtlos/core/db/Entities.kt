@@ -1,8 +1,10 @@
 package de.jenz.nahtlos.core.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import de.jenz.nahtlos.core.feed.FeedRefresh
 
 @Entity(
     tableName = "podcasts",
@@ -20,6 +22,9 @@ data class PodcastEntity(
     val personsJson: String,
     val lastFetchedAt: Long,
     val needsSync: Boolean,
+    @ColumnInfo(defaultValue = "OK")
+    val refreshStatus: String = FeedRefresh.OK,
+    val refreshError: String? = null,
 )
 
 @Entity(

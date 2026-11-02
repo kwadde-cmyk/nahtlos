@@ -66,10 +66,15 @@ fun Application.module(
     clock: () -> Long = { System.currentTimeMillis() },
 ) {
     val hub = ProgressHub()
+    val guard = PairingGuard(clock)
+    val random = java.security.SecureRandom()
     install(XForwardedHeaders)
     install(ContentNegotiation) { json(NahtlosJson.json) }
     install(WebSockets) { pingPeriodMillis = 25_000 }
     install(StatusPages) {
+        exception<RateLimitedException> { call, cause ->
+            call.respond(HttpStatusCode.TooManyRequests, ErrorBody(cause.message ?: "Zu viele Versuche"))
+        }
         exception<IllegalArgumentException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ErrorBody(cause.message ?: "Ungültige Anfrage"))
         }
@@ -80,19 +85,29 @@ fun Application.module(
     }
     intercept(ApplicationCallPipeline.Plugins) {
         val path = call.request.local.uri.substringBefore('?')
-        if (path == "/health") return@intercept
+        if (path == "/health" || path == "/v1/pair/start" || path == "/v1/pair/poll") return@intercept
         val presented = bearerToken(call.request.header("Authorization"))
             ?: call.request.queryParameters["token"]
-        if (presented != token) {
+        val auth = if (presented != null && constantTimeEquals(presented, token)) {
+            AuthKind.Admin
+        } else if (presented != null) {
+            database.touchDevice(presented, clock())?.let { AuthKind.Device(it) }
+        } else {
+            null
+        }
+        if (auth == null) {
             call.respond(HttpStatusCode.Unauthorized, ErrorBody("Token fehlt oder ist falsch"))
             finish()
+            return@intercept
         }
+        call.attributes.put(NahtlosAuthKey, auth)
     }
 
     routing {
         get("/health") { call.respond(mapOf("status" to "ok")) }
 
         route("/v1") {
+            deviceRoutes(database, clock, guard, random)
             get("/subscriptions") { call.respond(database.listSubscriptions()) }
 
             put("/subscriptions") {

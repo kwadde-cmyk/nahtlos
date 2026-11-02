@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +33,7 @@ class RealtimeSync @Inject constructor(
     private val settings: SettingsStore,
     private val okHttp: OkHttpClient,
     private val outboxWork: OutboxWork,
+    private val feedRefresh: FeedRefreshWork,
     private val downloads: DownloadScheduler,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -40,6 +43,7 @@ class RealtimeSync @Inject constructor(
         if (started) return
         started = true
         outboxWork.schedule()
+        feedRefresh.schedule()
         downloads.ensureCleanup()
         downloads.enqueue()
         val manager = context.getSystemService(ConnectivityManager::class.java)
@@ -64,6 +68,8 @@ class RealtimeSync @Inject constructor(
             try {
                 awaitSocket(current)
                 backoff = 1_000L
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Log.d(TAG, "WebSocket zu: ${e.message}")
                 delay(backoff)

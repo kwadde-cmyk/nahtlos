@@ -29,10 +29,7 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import android.net.Uri
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,17 +63,22 @@ import coil.compose.AsyncImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.db.ContinueRow
 import de.jenz.nahtlos.core.db.PodcastEntity
+import de.jenz.nahtlos.core.feed.FeedRefresh
+import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.playback.PlayerSnapshot
 import de.jenz.nahtlos.core.sync.SyncRepository
 import de.jenz.nahtlos.core.sync.SyncStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -84,6 +86,7 @@ class HomeViewModel @Inject constructor(
     private val feeds: FeedRepository,
     private val sync: SyncRepository,
     private val player: PlayerConnection,
+    private val feedRefresh: FeedRefreshWork,
 ) : ViewModel() {
     val podcasts = feeds.observePodcasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val continueListening = feeds.observeContinue().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -106,14 +109,15 @@ class HomeViewModel @Inject constructor(
         if (url.isEmpty()) return
         viewModelScope.launch {
             _subscribe.value = SubscribeState.Loading
-            runCatching { feeds.subscribe(url, markNeedsSync = true) }
-                .onSuccess { podcast ->
-                    sync.pushSubscription(podcast.feedUrl)
-                    _subscribe.value = SubscribeState.Idle
-                }
-                .onFailure { error ->
-                    _subscribe.value = SubscribeState.Error(error.message ?: "Feed konnte nicht gelesen werden")
-                }
+            try {
+                val podcast = feeds.subscribe(url, markNeedsSync = true)
+                sync.pushSubscription(podcast.feedUrl)
+                _subscribe.value = SubscribeState.Idle
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _subscribe.value = SubscribeState.Error(error.message ?: "Feed konnte nicht gelesen werden")
+            }
         }
     }
 
@@ -131,11 +135,39 @@ class HomeViewModel @Inject constructor(
 
     fun importOpml(xml: String, onDone: (String) -> Unit) {
         viewModelScope.launch {
-            val count = runCatching { sync.importOpml(xml) }.getOrElse {
-                onDone(it.message ?: "OPML konnte nicht gelesen werden")
+            if (xml.isBlank()) {
+                onDone("Die Datei ist leer")
                 return@launch
             }
-            onDone("$count Feeds aus der OPML-Datei übernommen")
+            try {
+                val count = sync.importOpml(xml)
+                val waiting = feeds.pendingRefresh().size
+                onDone(
+                    when {
+                        count == 0 -> "Keine Feeds in der Datei"
+                        waiting == 0 -> "$count Feeds übernommen"
+                        else -> "$count Feeds übernommen, lade Folgen…"
+                    },
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onDone(error.message ?: "OPML konnte nicht gelesen werden")
+            }
+        }
+    }
+
+    fun retryFailed() {
+        viewModelScope.launch {
+            feeds.retryFailed()
+            feedRefresh.schedule()
+        }
+    }
+
+    fun retryFeed(id: String) {
+        viewModelScope.launch {
+            feeds.retryOne(id)
+            feedRefresh.schedule()
         }
     }
 
@@ -167,10 +199,19 @@ fun HomeScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val importOpml = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val text = context.contentResolver.openInputStream(uri)?.use { input ->
-            BufferedReader(InputStreamReader(input)).readText()
-        }.orEmpty()
-        viewModel.importOpml(text) { banner = it }
+        scope.launch {
+            val text = try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                banner = error.message ?: "Die Datei konnte nicht gelesen werden"
+                return@launch
+            }
+            viewModel.importOpml(text) { banner = it }
+        }
     }
     val exportOpml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -216,6 +257,7 @@ fun HomeScreen(
             banner?.let { text ->
                 Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             }
+            RefreshBanner(podcasts, onRetryFailed = viewModel::retryFailed)
             StatusBanner(status) { viewModel.onForeground() }
             when {
                 status.syncing && podcasts.isEmpty() && continueRows.isEmpty() -> LoadingState("Abos werden geholt …")
@@ -228,6 +270,7 @@ fun HomeScreen(
                         onOpenPlayer(key)
                     },
                     onOpenPodcast = onOpenPodcast,
+                    onRetryFeed = viewModel::retryFeed,
                 )
             }
         }
@@ -258,6 +301,33 @@ private fun StatusBanner(status: SyncStatus, onRetry: () -> Unit) {
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (status.configured && status.lastError != null) {
             TextButton(onClick = onRetry) { Text("Erneut versuchen") }
+        }
+    }
+}
+
+@Composable
+private fun RefreshBanner(podcasts: List<PodcastEntity>, onRetryFailed: () -> Unit) {
+    val waiting = podcasts.count {
+        it.refreshStatus == FeedRefresh.PENDING || it.refreshStatus == FeedRefresh.LOADING
+    }
+    val failed = podcasts.count { it.refreshStatus == FeedRefresh.FAILED }
+    if (podcasts.isEmpty() || (waiting == 0 && failed == 0)) return
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        if (waiting > 0) {
+            val done = podcasts.size - waiting
+            Text("Folgen laden… $done/${podcasts.size}", style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(
+                progress = { done.toFloat() / podcasts.size.coerceAtLeast(1) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+        }
+        if (failed > 0) {
+            Text(
+                if (failed == 1) "1 Feed konnte nicht geladen werden" else "$failed Feeds konnten nicht geladen werden",
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            TextButton(onClick = onRetryFailed) { Text("Erneut versuchen") }
         }
     }
 }
@@ -301,6 +371,7 @@ private fun LibraryList(
     podcasts: List<PodcastEntity>,
     onContinue: (String) -> Unit,
     onOpenPodcast: (String) -> Unit,
+    onRetryFeed: (String) -> Unit,
 ) {
     LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
         if (continueRows.isNotEmpty()) {
@@ -330,7 +401,15 @@ private fun LibraryList(
             )
         }
         items(podcasts, key = { it.id }) { podcast ->
-            PodcastRow(podcast, onClick = { onOpenPodcast(podcast.id) })
+            PodcastRow(
+                podcast,
+                onClick = { onOpenPodcast(podcast.id) },
+                onRetry = if (podcast.refreshStatus == FeedRefresh.FAILED) {
+                    { onRetryFeed(podcast.id) }
+                } else {
+                    null
+                },
+            )
         }
     }
 }
@@ -361,7 +440,7 @@ private fun ContinueCard(row: ContinueRow, onClick: () -> Unit) {
 }
 
 @Composable
-fun PodcastRow(podcast: PodcastEntity, onClick: () -> Unit) {
+fun PodcastRow(podcast: PodcastEntity, onClick: () -> Unit, onRetry: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -371,12 +450,25 @@ fun PodcastRow(podcast: PodcastEntity, onClick: () -> Unit) {
     ) {
         Artwork(podcast.imageUrl, podcast.title, Modifier.size(56.dp))
         Spacer(Modifier.width(14.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(podcast.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val subtitle = podcast.author ?: podcast.description
-            if (subtitle.isNotBlank()) {
-                Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val failed = podcast.refreshStatus == FeedRefresh.FAILED
+            val subtitle = when (podcast.refreshStatus) {
+                FeedRefresh.PENDING, FeedRefresh.LOADING -> "Folgen werden geladen"
+                FeedRefresh.FAILED -> podcast.refreshError ?: "Feed konnte nicht geladen werden"
+                else -> podcast.author ?: podcast.description
             }
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (onRetry != null) {
+            TextButton(onClick = onRetry) { Text("Erneut") }
         }
     }
 }

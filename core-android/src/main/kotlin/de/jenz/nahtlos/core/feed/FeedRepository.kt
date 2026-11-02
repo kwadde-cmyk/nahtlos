@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.core.feed
 
+import androidx.room.withTransaction
 import de.jenz.nahtlos.core.SyncPolicy
 import de.jenz.nahtlos.core.db.ContinueRow
 import de.jenz.nahtlos.core.db.EpisodeEntity
@@ -19,7 +20,9 @@ import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.FeedParseException
 import de.jenz.nahtlos.model.NahtlosJson
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -50,32 +53,45 @@ class FeedRepository @Inject constructor(
         Opml.write("Nahtlos", outlines)
     }
 
-    suspend fun rememberFeed(rawUrl: String, title: String) = withContext(Dispatchers.IO) {
-        val url = try {
-            normalizeHttp(rawUrl)
-        } catch (_: Exception) {
-            return@withContext
+    /**
+     * Stores title and URL only. Episode bodies are loaded later by [FeedRefreshWork].
+     * Returns how many outlines had a usable http(s) address, including ones already stored.
+     */
+    suspend fun rememberOutlines(outlines: List<OpmlOutline>): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (outline in outlines) {
+            val url = try {
+                normalizeHttp(outline.feedUrl)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                continue
+            }
+            count++
+            if (db.podcasts().byFeedUrl(url) != null) continue
+            db.podcasts().upsert(stub(url, outline.title.ifBlank { url }))
         }
-        if (db.podcasts().byFeedUrl(url) != null) return@withContext
-        try {
-            refreshUrl(url, markNeedsSync = true)
-        } catch (_: Exception) {
-            db.podcasts().upsert(
-                PodcastEntity(
-                    id = EpisodeKeys.podcastId(null, url),
-                    feedUrl = url,
-                    title = title.ifBlank { url },
-                    description = "",
-                    imageUrl = null,
-                    podcastGuid = null,
-                    author = null,
-                    link = null,
-                    personsJson = "[]",
-                    lastFetchedAt = 0,
-                    needsSync = true,
-                ),
-            )
-        }
+        count
+    }
+
+    suspend fun requeueInterrupted() = withContext(Dispatchers.IO) {
+        db.podcasts().requeueInterrupted()
+    }
+
+    suspend fun pendingRefresh(): List<PodcastEntity> = withContext(Dispatchers.IO) {
+        db.podcasts().pending()
+    }
+
+    suspend fun retryFailed() = withContext(Dispatchers.IO) {
+        db.podcasts().requeueFailed()
+    }
+
+    suspend fun retryOne(id: String) = withContext(Dispatchers.IO) {
+        db.podcasts().requeue(id)
+    }
+
+    suspend fun markFailed(id: String, message: String?) = withContext(Dispatchers.IO) {
+        db.podcasts().setRefresh(id, FeedRefresh.FAILED, message?.take(180) ?: "Feed konnte nicht geladen werden")
     }
 
     suspend fun subscribe(rawUrl: String, markNeedsSync: Boolean): PodcastEntity = withContext(Dispatchers.IO) {
@@ -92,8 +108,19 @@ class FeedRepository @Inject constructor(
 
     suspend fun ensureFresh(podcastId: String, force: Boolean = false) {
         val podcast = db.podcasts().get(podcastId) ?: return
-        if (!force && !isStale(podcast)) return
-        runCatching { refresh(podcastId) }
+        if (!force) {
+            when (podcast.refreshStatus) {
+                FeedRefresh.PENDING, FeedRefresh.LOADING, FeedRefresh.FAILED -> return
+                FeedRefresh.OK -> if (!isStale(podcast)) return
+            }
+        }
+        try {
+            refresh(podcastId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (force) throw error
+        }
     }
 
     suspend fun deleteLocal(podcastId: String) = withContext(Dispatchers.IO) {
@@ -110,11 +137,15 @@ class FeedRepository @Inject constructor(
         val episode = db.episodes().get(episodeKey) ?: return@withContext emptyList()
         val inline = episode.chapters()
         if (inline.isNotEmpty() || episode.chaptersUrl.isNullOrBlank()) return@withContext inline
-        val fetched = runCatching {
+        val fetched = try {
             withTimeout(12_000) {
                 chapters.parse(net.getText(episode.chaptersUrl))
             }
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
         if (fetched.isNotEmpty()) {
             db.episodes().updateChapters(episodeKey, NahtlosJson.json.encodeToString(fetched))
         }
@@ -122,17 +153,59 @@ class FeedRepository @Inject constructor(
     }
 
     private suspend fun refreshUrl(url: String, markNeedsSync: Boolean): PodcastEntity {
-        val xml = try {
-            withTimeout(20_000) { net.getText(url) }
-        } catch (e: Exception) {
-            throw FeedParseException(e.message ?: "Feed konnte nicht geladen werden", e)
+        val existing = db.podcasts().byFeedUrl(url)
+        if (existing != null) {
+            db.podcasts().setRefresh(existing.id, FeedRefresh.LOADING, null)
         }
-        val parsed = parser.parse(xml)
-        val podcast = parsed.toPodcast(url, markNeedsSync, System.currentTimeMillis())
-        db.podcasts().upsert(podcast)
-        db.episodes().upsertAll(parsed.episodes.map { it.toEntity(podcast) })
-        return podcast
+        try {
+            val bundle = withTimeout(FeedRefresh.TIMEOUT_MS) {
+                net.read(url) { reader ->
+                    val parsed = parser.parse(reader, RssFeedParser.MAX_EPISODES_PER_REFRESH)
+                    val podcast = parsed.toPodcast(
+                        feedUrl = url,
+                        needsSync = markNeedsSync,
+                        fetchedAt = System.currentTimeMillis(),
+                        existingId = existing?.id,
+                    ).copy(refreshStatus = FeedRefresh.OK, refreshError = null)
+                    podcast to parsed.episodes.map { it.toEntity(podcast) }
+                }
+            }
+            val (podcast, episodes) = bundle
+            db.withTransaction {
+                db.podcasts().upsert(podcast)
+                episodes.chunked(FeedRefresh.EPISODE_BATCH).forEach { chunk ->
+                    db.episodes().upsertAll(chunk)
+                }
+            }
+            return podcast
+        } catch (timeout: TimeoutCancellationException) {
+            existing?.let { markFailed(it.id, "Zeitüberschreitung") }
+            throw FeedParseException("Zeitüberschreitung", timeout)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val message = (error as? FeedParseException)?.message ?: error.message
+            existing?.let { markFailed(it.id, message) }
+            if (error is FeedParseException) throw error
+            throw FeedParseException(message ?: "Feed konnte nicht geladen werden", error)
+        }
     }
+
+    private fun stub(url: String, title: String) = PodcastEntity(
+        id = EpisodeKeys.podcastId(null, url),
+        feedUrl = url,
+        title = title,
+        description = "",
+        imageUrl = null,
+        podcastGuid = null,
+        author = null,
+        link = null,
+        personsJson = "[]",
+        lastFetchedAt = 0,
+        needsSync = true,
+        refreshStatus = FeedRefresh.PENDING,
+        refreshError = null,
+    )
 
     private fun isStale(podcast: PodcastEntity): Boolean =
         System.currentTimeMillis() - podcast.lastFetchedAt > SyncPolicy.FEED_STALE_MS

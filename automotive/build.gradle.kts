@@ -15,6 +15,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        val defaultServer = (
+            (project.findProperty("NAHTLOS_DEFAULT_SERVER") as String?)
+                ?: System.getenv("NAHTLOS_DEFAULT_SERVER")
+                ?: ""
+            ).replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "NAHTLOS_DEFAULT_SERVER", "\"$defaultServer\"")
     }
     buildTypes {
         release {
@@ -31,7 +37,7 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
     }
     packaging {
         resources {
@@ -55,4 +61,5 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
     implementation(libs.coroutines.android)
+    implementation(libs.zxing.core)
 }

@@ -33,6 +33,7 @@ import de.jenz.nahtlos.ui.HomeScreen
 import de.jenz.nahtlos.ui.HomeViewModel
 import de.jenz.nahtlos.ui.MiniPlayer
 import de.jenz.nahtlos.ui.PlayerScreen
+import de.jenz.nahtlos.ui.PairScreen
 import de.jenz.nahtlos.ui.PlaylistScreen
 import de.jenz.nahtlos.ui.SettingsScreen
 import de.jenz.nahtlos.ui.NahtlosTheme
@@ -113,7 +114,10 @@ private fun AppNav() {
                 )
             }
             composable("settings") {
-                SettingsScreen(onBack = { nav.popBackStack() })
+                SettingsScreen(onBack = { nav.popBackStack() }, onOpenPairing = { nav.navigate("pair") })
+            }
+            composable("pair") {
+                PairScreen(onBack = { nav.popBackStack() })
             }
         }
         if (showMini) {

@@ -1,6 +1,10 @@
 package de.jenz.nahtlos.core.net
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -9,8 +13,13 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.ByteArrayOutputStream
+import java.io.FilterInputStream
 import java.io.IOException
+import java.io.InputStream
+import java.io.InputStreamReader
+import java.io.Reader
 import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -19,6 +28,35 @@ class Net(private val client: OkHttpClient) {
         val bytes = execute(request(url, "GET", null, headers), maxBytes)
         return decodeXml(bytes)
     }
+
+    /**
+     * Hands the response body to [block] as a reader. The body is not buffered into one string.
+     * [block] runs on the IO dispatcher and must finish before it returns; the stream closes afterwards.
+     */
+    suspend fun <T> read(url: String, maxBytes: Long = MAX_FEED_BYTES, block: (Reader) -> T): T =
+        withContext(Dispatchers.IO) {
+            val call = client.newCall(request(url, "GET", null, emptyMap()))
+            call.timeout().timeout(45, TimeUnit.SECONDS)
+            coroutineContext.job.invokeOnCompletion { error ->
+                if (error != null) call.cancel()
+            }
+            runInterruptible {
+                call.execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+                    val body = response.body ?: throw IOException("Leere Antwort")
+                    val source = body.source()
+                    source.request(1)
+                    val peek = source.peek()
+                    peek.request(480)
+                    val headLen = minOf(480L, peek.buffer.size).toInt()
+                    val head = if (headLen > 0) peek.readByteArray(headLen.toLong()) else ByteArray(0)
+                    val charset = charsetOf(head, body.contentType()?.charset(Charsets.UTF_8))
+                    LimitedInputStream(source.inputStream(), maxBytes).use { limited ->
+                        InputStreamReader(limited, charset).buffered().use { reader -> block(reader) }
+                    }
+                }
+            }
+        }
 
     suspend fun exchange(
         url: String,
@@ -49,6 +87,7 @@ class Net(private val client: OkHttpClient) {
 
     private suspend fun execute(request: Request, maxBytes: Int): ByteArray = suspendCancellableCoroutine { continuation ->
         val call = client.newCall(request)
+        call.timeout().timeout(30, TimeUnit.SECONDS)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -102,7 +141,15 @@ class Net(private val client: OkHttpClient) {
 
     companion object {
         const val USER_AGENT = "Nahtlos/0.1 (Android; podcast sync)"
+        const val MAX_FEED_BYTES = 16L * 1024 * 1024
         private val JSON = "application/json; charset=utf-8".toMediaType()
+
+        fun charsetOf(head: ByteArray, fallback: Charset?): Charset {
+            val ascii = head.toString(Charsets.US_ASCII)
+            val encoding = Regex("""encoding\s*=\s*["']([A-Za-z0-9._\-]+)["']""").find(ascii)?.groupValues?.get(1)
+            val name = encoding ?: fallback?.name() ?: "UTF-8"
+            return runCatching { Charset.forName(name) }.getOrDefault(Charsets.UTF_8)
+        }
 
         fun decodeXml(bytes: ByteArray): String {
             val head = bytes.copyOfRange(0, minOf(bytes.size, 240)).toString(Charsets.US_ASCII)
@@ -114,3 +161,27 @@ class Net(private val client: OkHttpClient) {
 }
 
 data class HttpResult(val code: Int, val body: String)
+
+private class LimitedInputStream(
+    input: InputStream,
+    private val maxBytes: Long,
+) : FilterInputStream(input) {
+    private var total = 0L
+
+    override fun read(): Int {
+        val value = super.read()
+        if (value >= 0) count(1)
+        return value
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val read = super.read(b, off, len)
+        if (read > 0) count(read.toLong())
+        return read
+    }
+
+    private fun count(n: Long) {
+        total += n
+        if (total > maxBytes) throw IOException("Antwort ist größer als $maxBytes Bytes")
+    }
+}

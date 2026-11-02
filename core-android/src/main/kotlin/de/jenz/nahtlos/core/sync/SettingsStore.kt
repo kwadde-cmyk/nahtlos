@@ -69,6 +69,12 @@ class SettingsStore @Inject constructor(
             .apply()
     }
 
+    fun serverDeviceId(): String = prefs.getString(KEY_SERVER_DEVICE, "").orEmpty()
+
+    fun saveServerDeviceId(id: String) {
+        prefs.edit().putString(KEY_SERVER_DEVICE, id).apply()
+    }
+
     fun observe(): Flow<ServerSettings> = callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(read()) }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -80,6 +86,7 @@ class SettingsStore @Inject constructor(
         private const val KEY_URL = "serverUrl"
         private const val KEY_TOKEN = "token"
         private const val KEY_DEVICE = "deviceId"
+        private const val KEY_SERVER_DEVICE = "serverDeviceId"
         private const val KEY_BUFFER = "bufferAheadMinutes"
         private const val KEY_UNMETERED = "downloadOnUnmeteredOnly"
         private const val KEY_LIMIT = "downloadLimitMb"

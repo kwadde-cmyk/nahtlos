@@ -8,7 +8,9 @@ import de.jenz.nahtlos.model.Subscription
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistResolver
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
+import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.sync.ProgressResolver
+import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
 
@@ -41,6 +43,32 @@ class SyncDatabase(path: String) : AutoCloseable {
                       document TEXT NOT NULL,
                       updated_at INTEGER NOT NULL,
                       server_received_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS devices (
+                      id TEXT PRIMARY KEY,
+                      name TEXT NOT NULL,
+                      token_hash TEXT NOT NULL UNIQUE,
+                      created_at INTEGER NOT NULL,
+                      last_seen_at INTEGER,
+                      revoked INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pairings (
+                      pairing_id TEXT PRIMARY KEY,
+                      code TEXT NOT NULL,
+                      created_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL,
+                      device_name TEXT,
+                      device_id TEXT,
+                      device_token TEXT,
+                      consumed INTEGER NOT NULL DEFAULT 0
                     )
                     """.trimIndent(),
                 )
@@ -253,6 +281,147 @@ class SyncDatabase(path: String) : AutoCloseable {
         }
     }
 
+    fun insertDevice(id: String, name: String, token: String, now: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            "INSERT INTO devices(id, name, token_hash, created_at, last_seen_at, revoked) VALUES (?, ?, ?, ?, NULL, 0)",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.setString(2, name)
+            statement.setString(3, EpisodeKeys.sha256(token))
+            statement.setLong(4, now)
+            statement.executeUpdate()
+        }
+    }
+
+    fun listDevices(): List<DeviceRow> = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT id, name, created_at, last_seen_at, revoked FROM devices ORDER BY created_at DESC",
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                val list = mutableListOf<DeviceRow>()
+                while (rows.next()) {
+                    list += DeviceRow(
+                        id = rows.getString(1),
+                        name = rows.getString(2),
+                        createdAt = rows.getLong(3),
+                        lastSeenAt = rows.getLong(4).takeIf { !rows.wasNull() },
+                        revoked = rows.getInt(5) != 0,
+                    )
+                }
+                list
+            }
+        }
+    }
+
+    fun revokeDevice(id: String): Boolean = synchronized(lock) {
+        connection.prepareStatement("UPDATE devices SET revoked = 1 WHERE id = ?").use { statement ->
+            statement.setString(1, id)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    /** Returns the device id when [token] matches a live device, and bumps last_seen_at. */
+    fun touchDevice(token: String, now: Long): String? = synchronized(lock) {
+        val hash = EpisodeKeys.sha256(token)
+        val id = connection.prepareStatement(
+            "SELECT id FROM devices WHERE token_hash = ? AND revoked = 0",
+        ).use { statement ->
+            statement.setString(1, hash)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.getString(1) else null }
+        } ?: return null
+        connection.prepareStatement("UPDATE devices SET last_seen_at = ? WHERE id = ?").use { statement ->
+            statement.setLong(1, now)
+            statement.setString(2, id)
+            statement.executeUpdate()
+        }
+        id
+    }
+
+    fun purgeExpiredPairings(now: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            "DELETE FROM pairings WHERE expires_at < ? AND (device_token IS NULL OR consumed = 1)",
+        ).use { statement ->
+            statement.setLong(1, now)
+            statement.executeUpdate()
+        }
+    }
+
+    fun pairingCodeInUse(code: String, now: Long): Boolean = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT 1 FROM pairings WHERE code = ? AND consumed = 0 AND expires_at >= ?",
+        ).use { statement ->
+            statement.setString(1, code)
+            statement.setLong(2, now)
+            statement.executeQuery().use { rows -> rows.next() }
+        }
+    }
+
+    fun insertPairing(id: String, code: String, now: Long, expiresAt: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            "INSERT INTO pairings(pairing_id, code, created_at, expires_at, consumed) VALUES (?, ?, ?, ?, 0)",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.setString(2, code)
+            statement.setLong(3, now)
+            statement.setLong(4, expiresAt)
+            statement.executeUpdate()
+        }
+    }
+
+    fun findPairingByCode(code: String): PairingRow? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT pairing_id, code, expires_at, device_name, device_id, device_token, consumed FROM pairings WHERE code = ? AND consumed = 0",
+        ).use { statement ->
+            statement.setString(1, code)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.toPairing() else null }
+        }
+    }
+
+    fun findPairing(id: String): PairingRow? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT pairing_id, code, expires_at, device_name, device_id, device_token, consumed FROM pairings WHERE pairing_id = ?",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.toPairing() else null }
+        }
+    }
+
+    fun approvePairing(pairingId: String, deviceId: String, name: String, token: String, expiresAt: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            UPDATE pairings
+            SET device_id = ?, device_name = ?, device_token = ?, expires_at = ?
+            WHERE pairing_id = ? AND consumed = 0 AND device_token IS NULL
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, deviceId)
+            statement.setString(2, name)
+            statement.setString(3, token)
+            statement.setLong(4, expiresAt)
+            statement.setString(5, pairingId)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    /** Returns the one-time token and forgets it. */
+    fun consumePairingToken(pairingId: String): PairingRow? = synchronized(lock) {
+        val row = connection.prepareStatement(
+            "SELECT pairing_id, code, expires_at, device_name, device_id, device_token, consumed FROM pairings WHERE pairing_id = ?",
+        ).use { statement ->
+            statement.setString(1, pairingId)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.toPairing() else null }
+        } ?: return null
+        if (row.deviceToken != null && row.consumed == 0) {
+            connection.prepareStatement(
+                "UPDATE pairings SET consumed = 1, device_token = NULL WHERE pairing_id = ?",
+            ).use { statement ->
+                statement.setString(1, pairingId)
+                statement.executeUpdate()
+            }
+        }
+        row
+    }
+
     override fun close() {
         synchronized(lock) { connection.close() }
     }
@@ -280,3 +449,34 @@ data class PlaylistApply(
     val response: PlaylistWriteResponse,
     val changed: Boolean,
 )
+
+data class DeviceRow(
+    val id: String,
+    val name: String,
+    val createdAt: Long,
+    val lastSeenAt: Long?,
+    val revoked: Boolean,
+)
+
+data class PairingRow(
+    val pairingId: String,
+    val code: String,
+    val expiresAt: Long,
+    val deviceName: String?,
+    val deviceId: String?,
+    val deviceToken: String?,
+    val consumed: Int,
+)
+
+private fun java.sql.ResultSet.toPairing(): PairingRow = PairingRow(
+    pairingId = getString(1),
+    code = getString(2),
+    expiresAt = getLong(3),
+    deviceName = getString(4),
+    deviceId = getString(5),
+    deviceToken = getString(6),
+    consumed = getInt(7),
+)
+
+fun constantTimeEquals(left: String, right: String): Boolean =
+    MessageDigest.isEqual(left.toByteArray(Charsets.UTF_8), right.toByteArray(Charsets.UTF_8))

@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.automotive
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -43,9 +45,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
@@ -69,14 +74,21 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
+    var url by remember(state.serverUrl) {
+        mutableStateOf(state.serverUrl.ifBlank { BuildConfig.NAHTLOS_DEFAULT_SERVER })
+    }
     var token by remember(state.token) { mutableStateOf(state.token) }
     var buffer by remember(state.bufferAheadMinutes) { mutableIntStateOf(state.bufferAheadMinutes) }
     var unmetered by remember(state.downloadOnUnmeteredOnly) { mutableStateOf(state.downloadOnUnmeteredOnly) }
     var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
     val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    val context = LocalContext.current
+    var crash by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+        crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
+    }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { snackbar.showSnackbar(it) }
     }
@@ -89,9 +101,19 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
         ) {
             Text("Nahtlos", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "Geparkt einrichten. Danach spielt die Medien-App ab der Position, an der das Telefon pausiert hat.",
+                "Geparkt einrichten. Danach spielt die Medien-App ab der Position, an der das Telefon pausiert hat. Dieser Bildschirm hat kein distractionOptimized und bleibt während der Fahrt gesperrt.",
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+            )
+            CarPairing(
+                serverUrl = url.trim().trimEnd('/'),
+                configured = state.configured,
+            )
+            Text("Server-Adresse", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Nur nötig, wenn sie nicht schon im QR-Code steckt und kein NAHTLOS_DEFAULT_SERVER gebaut wurde.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
             OutlinedTextField(
                 value = url,
@@ -102,6 +124,12 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(16.dp))
+            Text("Token von Hand", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Fallback, wenn das Koppeln nicht geht. Beim Speichern mit dem Admin-Token legt der Server ein eigenes Geräte-Token an.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
@@ -154,17 +182,48 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
             state.message?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
             }
+            Spacer(Modifier.height(16.dp))
+            Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)
+            if (crash.isNullOrBlank()) {
+                Text(
+                    "Keiner protokolliert.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                SelectionContainer {
+                    Text(
+                        crash.orEmpty(),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 8,
+                    )
+                }
+                Row {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Absturz")
+                            putExtra(Intent.EXTRA_TEXT, crash)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Absturzbericht teilen"))
+                    }) { Text("Teilen") }
+                    androidx.compose.material3.TextButton(onClick = {
+                        CrashLog.clear(context)
+                        crash = null
+                    }) { Text("Löschen") }
+                }
+            }
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = {
-                    viewModel.syncNow(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                    viewModel.syncNow(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24, enrollName = "Auto")
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text(if (state.syncing) "Synchronisiert …" else "Speichern und synchronisieren") }
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = {
-                    viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24)
+                    viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24, enrollName = "Auto")
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text("Verbindung prüfen") }

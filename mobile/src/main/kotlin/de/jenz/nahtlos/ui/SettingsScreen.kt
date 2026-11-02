@@ -3,6 +3,7 @@ package de.jenz.nahtlos.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,14 +46,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, wide: Boolean = false, viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenPairing: () -> Unit = {},
+    wide: Boolean = false,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by remember(state.token) { mutableStateOf(state.token) }
@@ -62,6 +71,10 @@ fun SettingsScreen(onBack: () -> Unit, wide: Boolean = false, viewModel: Setting
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var crash by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
+    }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { message -> snackbar.showSnackbar(message) }
     }
@@ -179,6 +192,38 @@ fun SettingsScreen(onBack: () -> Unit, wide: Boolean = false, viewModel: Setting
                 onClick = { viewModel.test(url, token, buffer, unmetered, limit.toIntOrNull() ?: 2048, deleteHours.toIntOrNull() ?: 24) },
                 modifier = Modifier.fillMaxWidth().height(if (wide) 64.dp else 52.dp),
             ) { Text("Verbindung prüfen") }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onOpenPairing,
+                modifier = Modifier.fillMaxWidth().height(if (wide) 64.dp else 52.dp),
+            ) { Text("Auto koppeln") }
+            Spacer(Modifier.height(20.dp))
+            Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)
+            if (crash.isNullOrBlank()) {
+                Text(
+                    "Keiner protokolliert. Ein Absturz schreibt den Stacktrace in den App-Speicher, auch ohne Logcat.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                SelectionContainer {
+                    Text(crash.orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
+                Row {
+                    TextButton(onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Absturz")
+                            putExtra(Intent.EXTRA_TEXT, crash)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Absturzbericht teilen"))
+                    }) { Text("Teilen") }
+                    TextButton(onClick = {
+                        CrashLog.clear(context)
+                        crash = null
+                    }) { Text("Löschen") }
+                }
+            }
             Spacer(Modifier.height(20.dp))
             Text(
                 "Im Auto reicht dieselbe URL und dasselbe Token. Ohne Eintrag bleibt der Browse-Baum leer und bietet „Server einrichten“ an.",
