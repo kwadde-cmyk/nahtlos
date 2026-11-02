@@ -4,6 +4,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/**
+ * Robolectric would not catch the Android crash: it still uses the JDK
+ * `javax.xml` parser. Android replaces that with DocumentBuilderFactoryImpl,
+ * which throws on setFeature / setXIncludeAware. An instrumented test would
+ * need a device or emulator, which this environment does not have.
+ */
+
 class OpmlTest {
     @Test
     fun readsNestedOutlinesAndIgnoresEntriesWithoutAFeed() {
@@ -32,5 +39,24 @@ class OpmlTest {
         )
         assertTrue(xml.contains("xmlUrl=\"https://cdn.example/show.xml\""))
         assertEquals("Show", Opml.parse(xml).single().title)
+    }
+
+    @Test
+    fun pocketCastsExportWithNestedOutlinesAndOpml10() {
+        val xml = javaClass.classLoader.getResource("opml/pocketcasts-export.xml")!!.readText()
+        assertTrue(xml.contains("standalone='yes'"))
+        assertTrue(xml.contains("<opml version=\"1.0\">"))
+        val outlines = Opml.parse(xml)
+        assertEquals(36, outlines.size)
+        assertEquals(
+            "https://anchor.fm/s/6b8bc084/podcast/rss",
+            outlines.first { it.title == "Pleb's Taverne" }.feedUrl,
+        )
+        assertEquals(
+            "Dezentral & Direkt – mit Joana Cotar und Roman Reher",
+            outlines.first { it.feedUrl.contains("c44e77ad") }.title,
+        )
+        assertTrue(outlines.none { it.title == "feeds" })
+        assertTrue(outlines.all { it.feedUrl.startsWith("http") })
     }
 }

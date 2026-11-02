@@ -1,11 +1,11 @@
 package de.jenz.nahtlos.opml
 
+import de.jenz.nahtlos.xml.XmlParsers
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import org.xml.sax.InputSource
 import java.io.StringReader
 import java.io.StringWriter
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
@@ -18,15 +18,7 @@ data class OpmlOutline(
 
 object Opml {
     fun parse(xml: String): List<OpmlOutline> {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = false
-            isXIncludeAware = false
-            isExpandEntityReferences = false
-            setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        }
+        val factory = XmlParsers.documentBuilderFactory(namespaceAware = false)
         val source = InputSource(StringReader(xml.removePrefix("\uFEFF")))
         val document = factory.newDocumentBuilder().parse(source)
         val found = mutableListOf<OpmlOutline>()
@@ -55,6 +47,8 @@ object Opml {
         }
         opml.appendChild(body)
         val writer = StringWriter()
+        // newTransformer() itself works on Android. setAttribute(ACCESS_EXTERNAL_*) does not,
+        // so export stays on the plain factory.
         TransformerFactory.newInstance().newTransformer().transform(DOMSource(document), StreamResult(writer))
         return writer.toString()
     }
