@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.feed
 
 import de.jenz.nahtlos.model.Chapter
+import de.jenz.nahtlos.xml.XmlParsers
 import de.jenz.nahtlos.model.FeedParseException
 import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
@@ -13,8 +14,6 @@ import java.io.StringReader
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * RSS 2.0 plus the Podcasting 2.0 fields the MVP needs:
@@ -24,15 +23,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 class RssFeedParser {
     fun parse(xml: String): ParsedFeed {
         val document = try {
-            val factory = DocumentBuilderFactory.newInstance().apply {
-                isNamespaceAware = true
-                isXIncludeAware = false
-                isExpandEntityReferences = false
-                setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                setFeature("http://xml.org/sax/features/external-general-entities", false)
-                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            }
+            val factory = XmlParsers.documentBuilderFactory(namespaceAware = true)
             val source = InputSource(StringReader(sanitize(xml)))
             source.encoding = "UTF-8"
             factory.newDocumentBuilder().parse(source)
