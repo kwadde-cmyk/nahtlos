@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,11 +50,24 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
+import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun HorizonChoices(selected: String, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        EpisodeHorizon.entries.forEach { option ->
+            TextButton(onClick = { onSelect(option.id) }) {
+                Text(if (option.id == selected) "● ${option.label}" else option.label)
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +84,7 @@ fun SettingsScreen(
     var unmetered by remember(state.downloadOnUnmeteredOnly) { mutableStateOf(state.downloadOnUnmeteredOnly) }
     var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
+    var horizon by remember(state.episodeHorizonId) { mutableStateOf(state.episodeHorizonId) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
@@ -144,6 +160,17 @@ fun SettingsScreen(
                 steps = PlaybackCachePolicy.MAX_AHEAD_MINUTES - PlaybackCachePolicy.MIN_AHEAD_MINUTES - 1,
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(8.dp))
+            Text("Folgen nachladen für die letzten …", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Beim Aktualisieren werden ältere Folgen im Feed übersprungen. Was schon in der Playlist steht oder eine Position hat, bleibt.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            HorizonChoices(horizon) { id ->
+                horizon = id
+                viewModel.setEpisodeHorizon(id)
+            }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Downloads nur ohne Mobilfunk", modifier = Modifier.weight(1f))
                 Switch(checked = unmetered, onCheckedChange = { unmetered = it })

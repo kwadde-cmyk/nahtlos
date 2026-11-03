@@ -12,6 +12,7 @@ import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.feed.ChapterJsonParser
 import de.jenz.nahtlos.feed.RssFeedParser
 import okhttp3.OkHttpClient
+import org.xmlpull.v1.XmlPullParser
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -41,7 +42,11 @@ object CoreModule {
     fun net(client: OkHttpClient): Net = Net(client)
 
     @Provides
-    fun rssParser(): RssFeedParser = RssFeedParser()
+    fun rssParser(): RssFeedParser = RssFeedParser {
+        android.util.Xml.newPullParser().also { parser ->
+            runCatching { parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true) }
+        }
+    }
 
     @Provides
     fun chapterParser(): ChapterJsonParser = ChapterJsonParser()

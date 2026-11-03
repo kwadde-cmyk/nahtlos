@@ -17,7 +17,8 @@ tasks.withType<JavaCompile>().configureEach {
 
 dependencies {
     implementation(libs.serialization.json)
-    implementation(libs.woodstox.core)
+    compileOnly(libs.xmlpull)
+    testImplementation(libs.kxml2)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:${libs.versions.junit.get()}")
 }
