@@ -8,6 +8,8 @@ import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.net.Net
+import de.jenz.nahtlos.core.sync.SettingsStore
+import javax.inject.Provider
 import de.jenz.nahtlos.feed.ChapterJsonParser
 import de.jenz.nahtlos.feed.RssFeedParser
 import de.jenz.nahtlos.opml.Opml
@@ -52,7 +54,13 @@ class ImportOnDeviceTest {
         val client = OkHttpClient.Builder().addInterceptor {
             throw IOException("Import darf noch keinen Feed laden")
         }.build()
-        val repo = FeedRepository(db, Net(client), RssFeedParser(), ChapterJsonParser())
+        val repo = FeedRepository(
+            db,
+            Net(client),
+            Provider { RssFeedParser() },
+            ChapterJsonParser(),
+            SettingsStore(context),
+        )
         try {
             for (name in listOf("hopp-export.xml", "pocketcasts-export.xml")) {
                 withContext(Dispatchers.IO) { db.clearAllTables() }

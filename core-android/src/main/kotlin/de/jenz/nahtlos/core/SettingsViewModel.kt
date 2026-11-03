@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
+import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -28,6 +29,7 @@ data class SettingsUi(
     val downloadOnUnmeteredOnly: Boolean = true,
     val downloadLimitMb: Int = 2048,
     val deletePlayedAfterHours: Int = 24,
+    val episodeHorizonId: String = EpisodeHorizon.DEFAULT.id,
     val message: String? = null,
     val messageIsError: Boolean = false,
 )
@@ -50,6 +52,7 @@ class SettingsViewModel @Inject constructor(
             downloadOnUnmeteredOnly = stored.downloadOnUnmeteredOnly,
             downloadLimitMb = stored.downloadLimitMb,
             deletePlayedAfterHours = stored.deletePlayedAfterHours,
+            episodeHorizonId = stored.episodeHorizonId,
             message = status.lastError,
             messageIsError = status.lastError != null,
         )
@@ -63,6 +66,7 @@ class SettingsViewModel @Inject constructor(
                 downloadOnUnmeteredOnly = it.downloadOnUnmeteredOnly,
                 downloadLimitMb = it.downloadLimitMb,
                 deletePlayedAfterHours = it.deletePlayedAfterHours,
+                episodeHorizonId = it.episodeHorizonId,
             )
         },
     )
@@ -77,6 +81,7 @@ class SettingsViewModel @Inject constructor(
         downloadOnUnmeteredOnly: Boolean,
         downloadLimitMb: Int,
         deletePlayedAfterHours: Int,
+        episodeHorizonId: String = settings.read().episodeHorizonId,
     ) {
         val trimmed = serverUrl.trim()
         val urlOk = trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")
@@ -88,6 +93,20 @@ class SettingsViewModel @Inject constructor(
             downloadOnUnmeteredOnly = downloadOnUnmeteredOnly,
             downloadLimitMb = downloadLimitMb,
             deletePlayedAfterHours = deletePlayedAfterHours,
+            episodeHorizonId = episodeHorizonId,
+        )
+    }
+
+    fun setEpisodeHorizon(id: String) {
+        val current = settings.read()
+        settings.save(
+            serverUrl = current.serverUrl,
+            token = current.token,
+            bufferAheadMinutes = current.bufferAheadMinutes,
+            downloadOnUnmeteredOnly = current.downloadOnUnmeteredOnly,
+            downloadLimitMb = current.downloadLimitMb,
+            deletePlayedAfterHours = current.deletePlayedAfterHours,
+            episodeHorizonId = EpisodeHorizon.fromId(id).id,
         )
     }
 

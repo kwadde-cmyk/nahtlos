@@ -6,44 +6,49 @@ import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
 import de.jenz.nahtlos.model.Person
 import de.jenz.nahtlos.model.TranscriptLink
-import com.ctc.wstx.stax.WstxInputFactory
+import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserFactory
 import java.io.Reader
 import java.io.StringReader
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import javax.xml.stream.XMLInputFactory
-import javax.xml.stream.XMLStreamConstants
-import javax.xml.stream.XMLStreamReader
 
 /**
- * Pull parser (StAX). Android's implementation is streaming, so a multi-megabyte
- * feed is not turned into a DOM. At most [maxEpisodes] newest episodes are kept.
+ * Streaming pull parser. Android uses the platform [XmlPullParser]; JVM tests use kxml2.
+ * Nothing here references javax.xml.stream. The parser object itself does no I/O until [parse].
+ *
+ * [publishedAfterEpochMs] drops older items. When the feed is newest-first, parsing of
+ * further items stops after the first run of older dates. [maxEpisodes] is an optional cap.
  */
-class RssFeedParser {
-    fun parse(xml: String, maxEpisodes: Int = Int.MAX_VALUE): ParsedFeed =
-        parse(StringReader(xml), maxEpisodes)
+class RssFeedParser(
+    private val pullParsers: () -> XmlPullParser = { defaultPullParser() },
+) {
+    fun parse(
+        xml: String,
+        maxEpisodes: Int = Int.MAX_VALUE,
+        publishedAfterEpochMs: Long? = null,
+    ): ParsedFeed = parse(StringReader(xml), maxEpisodes, publishedAfterEpochMs)
 
-    fun parse(reader: Reader, maxEpisodes: Int = Int.MAX_VALUE): ParsedFeed {
-        // Woodstox, not the platform factory: Android has no usable javax.xml.stream,
-        // and its DocumentBuilder rejects the secure-processing features.
-        val factory = WstxInputFactory()
-        runCatching { factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false) }
-        runCatching { factory.setProperty(XMLInputFactory.SUPPORT_DTD, false) }
-        runCatching { factory.setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, true) }
-        val xml = factory.createXMLStreamReader(AmpersandFixReader(reader))
+    fun parse(
+        reader: Reader,
+        maxEpisodes: Int = Int.MAX_VALUE,
+        publishedAfterEpochMs: Long? = null,
+    ): ParsedFeed {
+        val xml = pullParsers()
+        runCatching { xml.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true) }
+        runCatching { xml.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false) }
+        xml.setInput(AmpersandFixReader(reader))
         return try {
-            readFeed(xml, maxEpisodes)
+            readFeed(xml, maxEpisodes, publishedAfterEpochMs)
         } catch (e: FeedParseException) {
             throw e
         } catch (e: Exception) {
             throw FeedParseException("Feed-XML konnte nicht gelesen werden: ${e.message}", e)
-        } finally {
-            runCatching { xml.close() }
         }
     }
 
-    private fun readFeed(xml: XMLStreamReader, maxEpisodes: Int): ParsedFeed {
+    private fun readFeed(xml: XmlPullParser, maxEpisodes: Int, publishedAfterEpochMs: Long?): ParsedFeed {
         val cursor = Cursor(xml)
         var title = ""
         var description = ""
@@ -55,34 +60,48 @@ class RssFeedParser {
         var author: String? = null
         val persons = mutableListOf<Person>()
         val episodes = ArrayList<ParsedEpisode>()
-        var seenChannel = false
-        while (xml.hasNext()) {
-            if (xml.next() != XMLStreamConstants.START_ELEMENT) continue
-            when (cursor.local()) {
-                "channel" -> seenChannel = true
-                "title" -> if (seenChannel && title.isEmpty()) title = cursor.text()
-                "encoded" -> if (seenChannel) encoded = cursor.text()
-                "description" -> if (seenChannel && description.isEmpty()) description = cursor.text()
-                "summary" -> if (seenChannel && summary.isEmpty()) summary = cursor.text()
-                "link" -> if (seenChannel && link == null) link = cursor.text().ifBlank { null }
-                "author" -> if (seenChannel && author == null) author = cursor.text().ifBlank { null }
-                "guid" -> if (seenChannel && guid == null) guid = cursor.text().ifBlank { null }
-                "person" -> if (seenChannel) cursor.person()?.let { persons += it }
-                "image" -> if (seenChannel && image == null) image = cursor.image()
-                "item" -> if (seenChannel) {
-                    cursor.item(image)?.let { episode ->
-                        episodes += episode
-                        if (maxEpisodes != Int.MAX_VALUE && episodes.size > maxEpisodes * 2) {
-                            trim(episodes, maxEpisodes)
+        var seenFeed = false
+        var seenNewer = false
+        var stopItems = false
+        var event = xml.next()
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.START_TAG) {
+                when (cursor.local()) {
+                    "channel", "feed" -> seenFeed = true
+                    "title" -> if (seenFeed && title.isEmpty()) title = cursor.text()
+                    "encoded" -> if (seenFeed) encoded = cursor.text()
+                    "description", "subtitle" -> if (seenFeed && description.isEmpty()) description = cursor.text()
+                    "summary" -> if (seenFeed && summary.isEmpty()) summary = cursor.text()
+                    "link" -> if (seenFeed && link == null) link = cursor.link()
+                    "author" -> if (seenFeed && author == null) author = cursor.text().ifBlank { null }
+                    "guid" -> if (seenFeed && guid == null) guid = cursor.text().ifBlank { null }
+                    "person" -> if (seenFeed) cursor.person()?.let { persons += it }
+                    "image", "icon" -> if (seenFeed && image == null) image = cursor.image()
+                    "item", "entry" -> if (!seenFeed) {
+                        cursor.skip()
+                    } else if (stopItems) {
+                        cursor.skip()
+                    } else {
+                        cursor.item(image)?.let { episode ->
+                            val published = episode.publishedAtEpochMs
+                            val tooOld = publishedAfterEpochMs != null && published != null && published < publishedAfterEpochMs
+                            if (tooOld) {
+                                if (seenNewer) stopItems = true
+                            } else {
+                                if (published != null) seenNewer = true
+                                episodes += episode
+                                if (maxEpisodes != Int.MAX_VALUE && episodes.size > maxEpisodes * 2) {
+                                    trim(episodes, maxEpisodes)
+                                }
+                            }
                         }
                     }
-                } else {
-                    cursor.skip()
+                    else -> if (seenFeed) cursor.skip()
                 }
-                else -> if (seenChannel) cursor.skip()
             }
+            event = if (xml.eventType == XmlPullParser.END_DOCUMENT) XmlPullParser.END_DOCUMENT else xml.next()
         }
-        if (!seenChannel) throw FeedParseException("Kein RSS-Channel im Feed")
+        if (!seenFeed) throw FeedParseException("Kein RSS-Channel im Feed")
         if (title.isBlank()) throw FeedParseException("Der Feed hat keinen Titel")
         trim(episodes, maxEpisodes)
         return ParsedFeed(
@@ -106,8 +125,8 @@ class RssFeedParser {
         episodes.addAll(kept)
     }
 
-    private class Cursor(private val xml: XMLStreamReader) {
-        fun local(): String = xml.localName
+    private class Cursor(private val xml: XmlPullParser) {
+        fun local(): String = xml.name ?: ""
 
         fun item(channelImage: String?): ParsedEpisode? {
             var title = ""
@@ -126,9 +145,9 @@ class RssFeedParser {
             val transcripts = mutableListOf<TranscriptLink>()
             val persons = mutableListOf<Person>()
             var depth = 1
-            while (depth > 0 && xml.hasNext()) {
-                when (xml.next()) {
-                    XMLStreamConstants.START_ELEMENT -> {
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
                         if (depth != 1) {
                             depth++
                             continue
@@ -136,14 +155,23 @@ class RssFeedParser {
                         when (local()) {
                             "title" -> title = text()
                             "encoded" -> encoded = text()
-                            "description" -> description = text()
+                            "description", "subtitle" -> description = text()
                             "summary" -> summary = text()
-                            "guid" -> guid = text().ifBlank { null }
+                            "guid", "id" -> guid = text().ifBlank { null }
                             "duration" -> duration = text()
-                            "pubDate" -> pubDate = text()
+                            "pubDate", "published" -> pubDate = text()
+                            "updated" -> if (pubDate == null) pubDate = text()
                             "enclosure" -> {
                                 enclosureUrl = attr("url")
                                 mimeType = attr("type")
+                                skip()
+                            }
+                            "link" -> {
+                                val href = attr("href")
+                                if (attr("rel") == "enclosure" && !href.isNullOrBlank()) {
+                                    enclosureUrl = href
+                                    mimeType = attr("type") ?: mimeType
+                                }
                                 skip()
                             }
                             "transcript" -> {
@@ -154,7 +182,7 @@ class RssFeedParser {
                                 skip()
                             }
                             "person" -> person()?.let { persons += it }
-                            "image" -> image = image()
+                            "image", "icon" -> image = image()
                             "chapters" -> readChapters(chapters) { url, type ->
                                 if (chaptersUrl == null && url != null) {
                                     chaptersUrl = url
@@ -165,7 +193,8 @@ class RssFeedParser {
                             else -> skip()
                         }
                     }
-                    XMLStreamConstants.END_ELEMENT -> depth--
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> break
                 }
             }
             val url = enclosureUrl ?: return null
@@ -186,19 +215,30 @@ class RssFeedParser {
             )
         }
 
+        fun link(): String? {
+            val href = attr("href")
+            return if (!href.isNullOrBlank()) {
+                skip()
+                href
+            } else {
+                text().ifBlank { null }
+            }
+        }
+
         private fun readChapters(into: MutableList<Chapter>, onUrl: (String?, String?) -> Unit) {
             onUrl(attr("url"), attr("type"))
             var depth = 1
-            while (depth > 0 && xml.hasNext()) {
-                when (xml.next()) {
-                    XMLStreamConstants.START_ELEMENT -> {
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
                         if (depth == 1 && local() == "chapter") {
                             chapter()?.let { into += it }
                         } else {
                             depth++
                         }
                     }
-                    XMLStreamConstants.END_ELEMENT -> depth--
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return
                 }
             }
         }
@@ -221,12 +261,13 @@ class RssFeedParser {
             }
             var url: String? = null
             var depth = 1
-            while (depth > 0 && xml.hasNext()) {
-                when (xml.next()) {
-                    XMLStreamConstants.START_ELEMENT -> {
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
                         if (depth == 1 && local() == "url") url = text() else depth++
                     }
-                    XMLStreamConstants.END_ELEMENT -> depth--
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return url?.ifBlank { null }
                 }
             }
             return url?.ifBlank { null }
@@ -254,18 +295,16 @@ class RssFeedParser {
         fun text(): String {
             val sb = StringBuilder()
             var depth = 1
-            while (depth > 0 && xml.hasNext()) {
-                when (xml.next()) {
-                    XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE ->
-                        if (depth == 1 && sb.length < MAX_TEXT_CHARS) {
-                            val room = MAX_TEXT_CHARS - sb.length
-                            val chars = xml.textCharacters
-                            val start = xml.textStart
-                            val length = minOf(xml.textLength, room)
-                            sb.append(chars, start, length)
-                        }
-                    XMLStreamConstants.START_ELEMENT -> depth++
-                    XMLStreamConstants.END_ELEMENT -> depth--
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.TEXT -> if (depth == 1 && sb.length < MAX_TEXT_CHARS) {
+                        val chunk = xml.text.orEmpty()
+                        val room = MAX_TEXT_CHARS - sb.length
+                        if (chunk.length <= room) sb.append(chunk) else sb.append(chunk, 0, room)
+                    }
+                    XmlPullParser.START_TAG -> depth++
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return sb.toString().trim()
                 }
             }
             return sb.toString().trim()
@@ -273,29 +312,29 @@ class RssFeedParser {
 
         fun skip() {
             var depth = 1
-            while (depth > 0 && xml.hasNext()) {
-                when (xml.next()) {
-                    XMLStreamConstants.START_ELEMENT -> depth++
-                    XMLStreamConstants.END_ELEMENT -> depth--
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> depth++
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return
                 }
             }
         }
 
         fun attr(name: String): String? {
             for (i in 0 until xml.attributeCount) {
-                val local = xml.getAttributeLocalName(i)
+                val local = xml.getAttributeName(i)
                 if (local == name) return xml.getAttributeValue(i)?.trim()?.ifEmpty { null }
             }
             return null
         }
+
+        private fun nextOrEnd(): Int =
+            if (xml.eventType == XmlPullParser.END_DOCUMENT) XmlPullParser.END_DOCUMENT else xml.next()
     }
 
     companion object {
-        /**
-         * Newest episodes kept from one refresh. Older episodes already stored are not deleted.
-         * A "since date" playlist can only include episodes that were stored, so a cutoff older
-         * than the oldest stored episode of a long-running show will miss the rest. See the README.
-         */
+        /** Optional safety cap. The app limits by [EpisodeHorizon] instead. */
         const val MAX_EPISODES_PER_REFRESH = 200
         private const val MAX_TEXT_CHARS = 8_000
 
@@ -360,6 +399,14 @@ class RssFeedParser {
             "yyyy-MM-dd'T'HH:mm:ssX",
         ).map { DateTimeFormatter.ofPattern(it, Locale.US) }
     }
+}
+
+private fun defaultPullParser(): XmlPullParser = try {
+    val factory = XmlPullParserFactory.newInstance()
+    factory.isNamespaceAware = true
+    factory.newPullParser()
+} catch (_: Exception) {
+    Class.forName("org.kxml2.io.KXmlParser").getDeclaredConstructor().newInstance() as XmlPullParser
 }
 
 /**

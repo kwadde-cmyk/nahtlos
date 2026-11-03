@@ -61,6 +61,36 @@ class FeedParserTest {
     }
 
     @Test
+    fun stopsEarlyWhenANewestFirstFeedLeavesTheHorizon() {
+        val now = RssFeedParser.parseDate("2026-11-02T08:00:00Z")!!
+        val cutoff = now - 14L * 86_400_000L
+        val xml = buildString {
+            append("<rss version=\"2.0\"><channel><title>Lang</title>")
+            append(item("heute", "https://ex/new.mp3", "2026-11-02T08:00:00Z"))
+            append(item("gestern", "https://ex/y.mp3", "2026-11-01T08:00:00Z"))
+            append(item("alt", "https://ex/old.mp3", "2024-06-01T00:00:00Z"))
+            append(item("noch-aelter", "https://ex/older.mp3", "2024-01-01T00:00:00Z"))
+            append("</channel></rss>")
+        }
+        val feed = parser.parse(xml, publishedAfterEpochMs = cutoff)
+        assertEquals(setOf("heute", "gestern"), feed.episodes.map { it.title }.toSet())
+    }
+
+    @Test
+    fun oldestFirstFeedStillKeepsEpisodesInsideTheHorizon() {
+        val now = RssFeedParser.parseDate("2026-11-02T08:00:00Z")!!
+        val cutoff = now - 14L * 86_400_000L
+        val xml = buildString {
+            append("<rss version=\"2.0\"><channel><title>Lang</title>")
+            append(item("alt", "https://ex/old.mp3", "2024-01-01T00:00:00Z"))
+            append(item("heute", "https://ex/new.mp3", "2026-11-02T08:00:00Z"))
+            append("</channel></rss>")
+        }
+        val feed = parser.parse(xml, publishedAfterEpochMs = cutoff)
+        assertEquals(listOf("heute"), feed.episodes.map { it.title })
+    }
+
+    @Test
     fun keepsOnlyTheNewestEpisodesWhenCapped() {
         val xml = buildString {
             append("<rss version=\"2.0\"><channel><title>Lang</title>")

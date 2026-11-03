@@ -9,7 +9,7 @@ import java.net.URLEncoder
  */
 object PairingCodes {
     const val TTL_SECONDS = 300
-    const val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    const val ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     private val allowed = ALPHABET.toSet()
 
     fun normalize(raw: String): String = raw.uppercase().filter { it in allowed }

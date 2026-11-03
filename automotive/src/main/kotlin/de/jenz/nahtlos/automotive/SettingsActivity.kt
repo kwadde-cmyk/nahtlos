@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
+import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -82,6 +83,7 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     var unmetered by remember(state.downloadOnUnmeteredOnly) { mutableStateOf(state.downloadOnUnmeteredOnly) }
     var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
+    var horizon by remember(state.episodeHorizonId) { mutableStateOf(state.episodeHorizonId) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
@@ -151,6 +153,20 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 steps = PlaybackCachePolicy.MAX_AHEAD_MINUTES - PlaybackCachePolicy.MIN_AHEAD_MINUTES - 1,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             )
+            Text("Folgen nachladen für die letzten …", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Ältere Folgen im Feed werden übersprungen. Playlist und gespeicherte Positionen bleiben.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            EpisodeHorizon.entries.forEach { option ->
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        horizon = option.id
+                        viewModel.setEpisodeHorizon(option.id)
+                    },
+                    modifier = Modifier.height(56.dp),
+                ) { Text(if (option.id == horizon) "● ${option.label}" else option.label) }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Downloads nur ohne Mobilfunk", modifier = Modifier.weight(1f))
                 Switch(checked = unmetered, onCheckedChange = { unmetered = it })

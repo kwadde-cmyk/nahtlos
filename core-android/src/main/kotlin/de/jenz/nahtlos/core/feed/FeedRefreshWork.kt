@@ -69,8 +69,8 @@ class FeedRefreshWorker(
                                 feeds.refresh(podcast.id)
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
-                            } catch (error: Exception) {
-                                feeds.markFailed(podcast.id, error.message)
+                            } catch (error: Throwable) {
+                                feeds.markFailed(podcast.id, error.message ?: error.javaClass.simpleName)
                             }
                         }
                     }

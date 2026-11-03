@@ -11,9 +11,12 @@ import de.jenz.nahtlos.core.db.chapters
 import de.jenz.nahtlos.core.db.toEntity
 import de.jenz.nahtlos.core.db.toPodcast
 import de.jenz.nahtlos.core.net.Net
+import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.ChapterJsonParser
+import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.feed.RssFeedParser
+import javax.inject.Provider
 import de.jenz.nahtlos.opml.Opml
 import de.jenz.nahtlos.opml.OpmlOutline
 import de.jenz.nahtlos.model.Chapter
@@ -33,8 +36,9 @@ import javax.inject.Singleton
 class FeedRepository @Inject constructor(
     private val db: NahtlosDatabase,
     private val net: Net,
-    private val parser: RssFeedParser,
+    private val parser: Provider<RssFeedParser>,
     private val chapters: ChapterJsonParser,
+    private val settings: SettingsStore,
 ) {
     fun observePodcasts(): Flow<List<PodcastEntity>> = db.podcasts().observeAll()
 
@@ -118,7 +122,7 @@ class FeedRepository @Inject constructor(
             refresh(podcastId)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             if (force) throw error
         }
     }
@@ -160,7 +164,16 @@ class FeedRepository @Inject constructor(
         try {
             val bundle = withTimeout(FeedRefresh.TIMEOUT_MS) {
                 net.read(url) { reader ->
-                    val parsed = parser.parse(reader, RssFeedParser.MAX_EPISODES_PER_REFRESH)
+                    val cutoff = EpisodeHorizon.fromId(settings.read().episodeHorizonId)
+                        .cutoffEpochMs(System.currentTimeMillis())
+                    // Upsert only. Episodes already stored — including ones in a playlist or
+                    // with a saved position — stay even when they fall outside the horizon.
+                    val parsed = try {
+                        parser.get().parse(reader, publishedAfterEpochMs = cutoff)
+                    } catch (error: Throwable) {
+                        if (error is CancellationException) throw error
+                        throw error
+                    }
                     val podcast = parsed.toPodcast(
                         feedUrl = url,
                         needsSync = markNeedsSync,
@@ -183,7 +196,7 @@ class FeedRepository @Inject constructor(
             throw FeedParseException("Zeitüberschreitung", timeout)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             val message = (error as? FeedParseException)?.message ?: error.message
             existing?.let { markFailed(it.id, message) }
             if (error is FeedParseException) throw error
