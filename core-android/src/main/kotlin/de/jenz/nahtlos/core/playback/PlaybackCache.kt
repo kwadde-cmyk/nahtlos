@@ -3,15 +3,21 @@ package de.jenz.nahtlos.core.playback
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import android.net.Uri
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,15 +38,22 @@ class PlaybackCache @Inject constructor(
     private var cache: SimpleCache? = null
 
     fun dataSourceFactory(): DataSource.Factory {
-        val upstream = DefaultHttpDataSource.Factory()
-            .setUserAgent(Net.USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(20_000)
         return CacheDataSource.Factory()
             .setCache(simpleCache())
-            .setUpstreamDataSourceFactory(upstream)
+            .setUpstreamDataSourceFactory(upstreamFactory(context))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    companion object {
+        /** file://, content:// and http(s). A bare HTTP source cannot open a downloaded episode. */
+        fun upstreamFactory(context: Context): DataSource.Factory {
+            val http = DefaultHttpDataSource.Factory()
+                .setUserAgent(Net.USER_AGENT)
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(8_000)
+                .setReadTimeoutMs(20_000)
+            return DefaultDataSource.Factory(context, http)
+        }
     }
 
     private fun simpleCache(): SimpleCache {
@@ -57,4 +70,37 @@ class PlaybackCache @Inject constructor(
             return created
         }
     }
+}
+
+/**
+ * Source errors stop after one extra attempt. A local file that cannot be opened
+ * fails immediately so the session can switch once to the stream URL.
+ */
+@UnstableApi
+class PlaybackLoadPolicy : DefaultLoadErrorHandlingPolicy(2) {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long {
+        if (isLocalSourceFailure(loadErrorInfo.exception) || loadErrorInfo.errorCount >= 2) {
+            return C.TIME_UNSET
+        }
+        return super.getRetryDelayMsFor(loadErrorInfo)
+    }
+}
+
+/** Prefer a readable local download. A missing file plays from the remote URL instead. */
+fun playbackUri(local: File?, remote: String): Uri {
+    if (local != null && local.isFile && local.length() > 0L && local.canRead()) {
+        return Uri.fromFile(local)
+    }
+    return Uri.parse(remote)
+}
+
+internal fun isLocalSourceFailure(error: Throwable): Boolean {
+    var current: Throwable? = error
+    while (current != null) {
+        if (current is ClassCastException) return true
+        val message = current.message.orEmpty()
+        if ("FileURLConnection" in message) return true
+        current = current.cause
+    }
+    return false
 }
