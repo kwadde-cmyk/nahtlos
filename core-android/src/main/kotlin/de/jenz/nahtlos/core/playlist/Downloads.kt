@@ -55,6 +55,22 @@ class DownloadScheduler @Inject constructor(
         )
     }
 
+    fun enqueueEpisode(episodeKey: String) {
+        if (episodeKey.isBlank()) return
+        val request = OneTimeWorkRequestBuilder<PlaylistDownloadWorker>()
+            .setInputData(androidx.work.workDataOf("episodeKey" to episodeKey))
+            .setConstraints(
+                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "nahtlos-episode-$episodeKey",
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
     fun ensureCleanup() {
         val request = PeriodicWorkRequestBuilder<DownloadCleanupWorker>(12, TimeUnit.HOURS).build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -136,13 +152,29 @@ class PlaylistDownloadWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val entry = EntryPointAccessors.fromApplication(applicationContext, DownloadEntryPoint::class.java)
         val playlist = entry.playlistRepository().current()
+        val only = inputData.getString("episodeKey")
         val settings = entry.settings().read()
         val store = entry.downloadStore()
         val client = entry.okHttp()
         val limit = settings.downloadLimitMb.toLong() * 1024L * 1024L
         val directory = File(applicationContext.filesDir, "downloads").apply { mkdirs() }
         try {
-            for (item in playlist.items) {
+            val queued = if (only.isNullOrBlank()) {
+                playlist.items
+            } else {
+                val episode = entry.database().episodes().get(only)
+                listOfNotNull(
+                    episode?.let {
+                        de.jenz.nahtlos.playlist.PlaylistEntry(
+                            episodeKey = it.episodeKey,
+                            publishedAt = it.publishedAt ?: 0L,
+                            title = it.title,
+                            enclosureUrl = it.enclosureUrl,
+                        )
+                    },
+                )
+            }
+            for (item in queued) {
                 if (item.enclosureUrl.isBlank()) continue
                 val progress = entry.database().progress().get(item.episodeKey)
                 if (progress?.status == ProgressStatus.COMPLETED.name) continue

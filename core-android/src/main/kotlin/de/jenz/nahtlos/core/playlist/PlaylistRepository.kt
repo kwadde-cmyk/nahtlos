@@ -8,7 +8,11 @@ import de.jenz.nahtlos.core.sync.ServerSettings
 import de.jenz.nahtlos.core.sync.SyncClient
 import de.jenz.nahtlos.core.sync.SyncHttpException
 import de.jenz.nahtlos.core.sync.SettingsStore
+import de.jenz.nahtlos.feed.EpisodeHorizon
+import de.jenz.nahtlos.playlist.PlaylistClock
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.playlist.ListeningPlaylist
@@ -33,25 +37,41 @@ class PlaylistRepository @Inject constructor(
         row?.json?.let { decode(it) } ?: ListeningPlaylist()
     }
 
+    fun observePlayed(): Flow<Set<String>> = db.progress().observeCompleted().map { it.toSet() }
+
+    fun observeDownloads(): Flow<Set<String>> = db.downloads().observeKeys().map { it.toSet() }
+
     suspend fun current(): ListeningPlaylist = db.playlist().get()?.let { decode(it.json) } ?: ListeningPlaylist()
 
-    suspend fun createFromDate(sinceEpochMs: Long, sort: PlaylistSort) {
+    suspend fun createFromDate(sinceEpochMs: Long, sort: PlaylistSort): PlaylistBuild = withContext(NonCancellable) {
         val existing = current()
-        val items = PlaylistEditor.generate(candidates(), sinceEpochMs, sort, existing.excludedKeys.toSet())
+        val rows = candidates()
+        val items = PlaylistEditor.generate(rows, sinceEpochMs, sort, existing.excludedKeys.toSet())
+        val build = describe(sinceEpochMs, rows, items.size, created = true)
+        AppLog.record("Playlist", "Erzeuge: ${build.logLine}")
         write(existing.copy(sinceEpochMs = sinceEpochMs, sort = sort, items = items), sync = true)
+        build
     }
 
-    suspend fun refresh() {
+    suspend fun refresh(): PlaylistBuild = withContext(NonCancellable) {
         val existing = current()
-        if (existing.sinceEpochMs <= 0L) return
+        if (existing.sinceEpochMs <= 0L) {
+            val empty = PlaylistBuild(0, "Noch kein Datum gewählt.", "kein Datum")
+            AppLog.record("Playlist", "Aktualisieren übersprungen: ${empty.message}")
+            return@withContext empty
+        }
+        val rows = candidates()
         val items = PlaylistEditor.refresh(
             existing.items,
-            candidates(),
+            rows,
             existing.sinceEpochMs,
             existing.sort,
             existing.excludedKeys.toSet(),
         )
+        val build = describe(existing.sinceEpochMs, rows, items.size, created = false)
+        AppLog.record("Playlist", "Aktualisieren: ${build.logLine}")
         write(existing.copy(items = items), sync = true)
+        build
     }
 
     suspend fun setSort(sort: PlaylistSort) {
@@ -157,7 +177,15 @@ class PlaylistRepository @Inject constructor(
         }
         val local = current()
         val merged = PlaylistResolver.merge(local, remote)
-        if (merged != local) {
+        val repair = PlaylistResolver.repairStamp(local, remote)
+        AppLog.record(
+            "Playlist",
+            "Abruf: Server ${remote.items.size} Folgen (Stand ${remote.updatedAt}), lokal ${local.items.size}.",
+        )
+        if (repair != null) {
+            AppLog.record("Playlist", "Leeres Server-Dokument ist neuer. Lokale ${local.items.size} Folgen werden zurückgeschrieben.")
+            push(current, local.copy(updatedAt = repair))
+        } else if (merged != local) {
             store(merged, needsSync = false)
         } else if (local.updatedAt > 0L && (PlaylistResolver.isPlaceholder(remote) || local.updatedAt > remote.updatedAt)) {
             push(current, local)
@@ -200,9 +228,10 @@ class PlaylistRepository @Inject constructor(
             val response = api.putPlaylist(settings, playlist)
             val adopted = PlaylistResolver.afterPush(playlist, response.accepted, response.stored)
             store(adopted, needsSync = !response.accepted && adopted == playlist)
-            if (!response.accepted) {
-                AppLog.record("Sync", "Server hat die Playlist abgelehnt. Lokal behalten (${playlist.items.size} Folgen).")
-            }
+            AppLog.record(
+                "Playlist",
+                "Upload ${if (response.accepted) "angenommen" else "abgelehnt"}: lokal ${playlist.items.size}, Server ${response.stored.items.size}.",
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: SyncHttpException) {
@@ -232,14 +261,32 @@ class PlaylistRepository @Inject constructor(
     private fun decode(json: String): ListeningPlaylist =
         runCatching { NahtlosJson.json.decodeFromString<ListeningPlaylist>(json) }.getOrDefault(ListeningPlaylist())
 
+    private fun describe(sinceEpochMs: Long, rows: List<PlaylistCandidate>, count: Int, created: Boolean): PlaylistBuild {
+        val date = PlaylistClock.format(sinceEpochMs)
+        val undated = rows.count { it.publishedAt <= 0L }
+        val older = rows.count { it.publishedAt > 0L && it.publishedAt < sinceEpochMs }
+        val horizon = EpisodeHorizon.fromId(settings.read().episodeHorizonId)
+        val message = when {
+            count > 0 && created -> "$count Folgen hinzugefügt"
+            count > 0 -> "$count Folgen in der Playlist"
+            rows.isEmpty() -> "Keine Folgen seit $date gefunden. Die Feeds sind noch leer; passende Folgen kommen dazu, sobald sie geladen sind."
+            else -> "Keine Folgen seit $date gefunden. $older gespeicherte Folgen sind älter" +
+                (if (undated > 0) ", $undated ohne Datum." else ".") +
+                " Vom Feed kommen nur die letzten ${horizon.label}."
+        }
+        return PlaylistBuild(count, message, "seit $date, Kandidaten ${rows.size}, älter $older, ohne Datum $undated, übernommen $count")
+    }
+
     private fun EpisodeCandidateRow.toCandidate() = PlaylistCandidate(
         episodeKey = episodeKey,
-        publishedAt = publishedAt,
+        publishedAt = publishedAt ?: 0L,
         title = title,
         podcastTitle = podcastTitle,
         feedUrl = feedUrl,
         enclosureUrl = enclosureUrl,
     )
 }
+
+data class PlaylistBuild(val count: Int, val message: String, val logLine: String)
 
 fun ListeningPlaylist.entry(episodeKey: String): PlaylistEntry? = items.firstOrNull { it.episodeKey == episodeKey }

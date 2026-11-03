@@ -101,7 +101,6 @@ interface EpisodeDao {
                p.feedUrl AS feedUrl
         FROM episodes e
         INNER JOIN podcasts p ON p.id = e.podcastId
-        WHERE e.publishedAt IS NOT NULL
         """,
     )
     suspend fun candidates(): List<EpisodeCandidateRow>
@@ -114,6 +113,9 @@ interface ProgressDao {
 
     @Query("SELECT * FROM progress")
     suspend fun all(): List<ProgressEntity>
+
+    @Query("SELECT episodeKey FROM progress WHERE status = 'COMPLETED'")
+    fun observeCompleted(): Flow<List<String>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: ProgressEntity)
@@ -215,6 +217,9 @@ interface DownloadDao {
         """,
     )
     fun observeRows(): kotlinx.coroutines.flow.Flow<List<DownloadRow>>
+
+    @Query("SELECT episodeKey FROM downloads")
+    fun observeKeys(): Flow<List<String>>
 
     @Query("SELECT * FROM downloads WHERE episodeKey = :episodeKey")
     suspend fun get(episodeKey: String): DownloadEntity?

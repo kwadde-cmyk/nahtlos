@@ -45,15 +45,18 @@ import de.jenz.nahtlos.core.library.EpisodeCommands
 import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
+import de.jenz.nahtlos.feed.EpisodeHorizon
+import de.jenz.nahtlos.playlist.PlaylistClock
 import de.jenz.nahtlos.playback.SwipeAction
 import de.jenz.nahtlos.playlist.PlaylistSort
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.ZoneId
 import javax.inject.Inject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -68,13 +71,19 @@ class PlaylistViewModel @Inject constructor(
     private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
     val undo = _undo.asSharedFlow()
     val playlist = playlists.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), de.jenz.nahtlos.playlist.ListeningPlaylist())
+    val played = playlists.observePlayed().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val downloads = playlists.observeDownloads().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice = _notice.asStateFlow()
 
     fun generate(sinceEpochMs: Long) {
-        viewModelScope.launch { playlists.createFromDate(sinceEpochMs, playlist.value.sort) }
+        viewModelScope.launch {
+            _notice.value = playlists.createFromDate(sinceEpochMs, playlist.value.sort).message
+        }
     }
 
     fun refresh() {
-        viewModelScope.launch { playlists.refresh() }
+        viewModelScope.launch { _notice.value = playlists.refresh().message }
     }
 
     fun toggleSort() {
@@ -88,6 +97,10 @@ class PlaylistViewModel @Inject constructor(
 
     fun act(action: SwipeAction, keys: List<String>) {
         viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
+    }
+
+    fun toggle(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
     }
 
     fun setRemoveWhenFinished(enabled: Boolean) {
@@ -104,11 +117,17 @@ fun PlaylistScreen(
 ) {
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val played by viewModel.played.collectAsStateWithLifecycle()
+    val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val horizonDays = EpisodeHorizon.fromId(settings.episodeHorizonId).days ?: 28
     val selection = rememberSelection()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     UndoEffect(viewModel.undo, snackbar)
-    var since by remember(playlist.sinceEpochMs) {
-        mutableLongStateOf(if (playlist.sinceEpochMs > 0) playlist.sinceEpochMs else System.currentTimeMillis() - 7L * 86_400_000L)
+    var since by remember(playlist.sinceEpochMs, horizonDays) {
+        mutableLongStateOf(
+            if (playlist.sinceEpochMs > 0) playlist.sinceEpochMs else PlaylistClock.daysAgoStart(horizonDays),
+        )
     }
     var showPicker by remember { mutableStateOf(false) }
     val picker = rememberDatePickerState(initialSelectedDateMillis = since)
@@ -131,10 +150,15 @@ fun PlaylistScreen(
                     onAll = { selection.all(playlist.items.map { it.episodeKey }) },
                     onNone = { selection.clear() },
                     actions = listOf(
-                        "Entfernen" to { viewModel.act(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear() },
-                        "Gehört" to { viewModel.act(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear() },
-                        "Ungehört" to { viewModel.act(SwipeAction.MARK_UNPLAYED, selection.keys.toList()); selection.clear() },
-                        "Datei weg" to { viewModel.act(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear() },
+                        bulkLabel(SwipeAction.REMOVE_PLAYLIST, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
+                            viewModel.toggle(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear()
+                        },
+                        bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
+                            viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
+                        },
+                        bulkLabel(SwipeAction.DELETE_DOWNLOAD, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
+                            viewModel.toggle(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear()
+                        },
                     ),
                 )
             }
@@ -172,6 +196,9 @@ fun PlaylistScreen(
                 TextButton(onClick = { showPicker = true }) {
                     Text("Seit ${formatDate(since)}")
                 }
+                notice?.let { text ->
+                    Text(text, modifier = Modifier.padding(top = 4.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { viewModel.generate(since) }) { Text("Erzeugen") }
                     TextButton(onClick = viewModel::refresh) { Text("Neue Folgen dazu") }
@@ -205,9 +232,12 @@ fun PlaylistScreen(
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                 items(order, key = { it.episodeKey }) { item ->
                     ReorderableItem(reorderState, key = item.episodeKey, enabled = !selection.active) { _ ->
+                        val inPlaylist = playlist.items.any { it.episodeKey == item.episodeKey }
+                        val resolvedStart = settings.swipeStart.resolved(item.episodeKey in played, inPlaylist, item.episodeKey in downloads)
+                        val resolvedEnd = settings.swipeEnd.resolved(item.episodeKey in played, inPlaylist, item.episodeKey in downloads)
                         SwipeRow(
-                            start = settings.swipeStart,
-                            end = settings.swipeEnd,
+                            start = resolvedStart,
+                            end = resolvedEnd,
                             enabled = !selection.active && !dragging.value,
                             onAction = { viewModel.act(it, listOf(item.episodeKey)) },
                         ) {
@@ -272,8 +302,7 @@ fun PlaylistScreen(
             confirmButton = {
                 TextButton(onClick = {
                     picker.selectedDateMillis?.let { selected ->
-                        val date = Instant.ofEpochMilli(selected).atZone(ZoneId.of("UTC")).toLocalDate()
-                        since = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        since = PlaylistClock.fromPickerUtc(selected)
                     }
                     showPicker = false
                 }) { Text("Übernehmen") }

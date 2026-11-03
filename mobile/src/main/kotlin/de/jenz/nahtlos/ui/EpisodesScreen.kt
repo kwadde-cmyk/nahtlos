@@ -52,6 +52,7 @@ import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.library.EpisodeCommands
 import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playback.PlayerConnection
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.ServerSettings
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
@@ -62,6 +63,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -73,6 +75,7 @@ class EpisodesViewModel @Inject constructor(
     private val sync: SyncRepository,
     private val player: PlayerConnection,
     private val commands: EpisodeCommands,
+    playlists: PlaylistRepository,
     settingsStore: SettingsStore,
 ) : ViewModel() {
     private val podcastId: String = checkNotNull(savedState["podcastId"])
@@ -83,6 +86,10 @@ class EpisodesViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
+    val playlistKeys = playlists.observe().map { playlist -> playlist.items.map { it.episodeKey }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val downloadKeys = playlists.observeDownloads()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
     val undo = _undo.asSharedFlow()
 
@@ -114,6 +121,10 @@ class EpisodesViewModel @Inject constructor(
         }
     }
 
+    fun toggle(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
+    }
+
     fun unsubscribe(onDone: () -> Unit) {
         viewModelScope.launch {
             val feedUrl = feeds.getPodcast(podcastId)?.feedUrl
@@ -136,6 +147,8 @@ fun EpisodesScreen(
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
+    val downloadKeys by viewModel.downloadKeys.collectAsStateWithLifecycle()
     val selection = rememberSelection()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     UndoEffect(viewModel.undo, snackbar)
@@ -169,14 +182,20 @@ fun EpisodesScreen(
                     count = selection.keys.size,
                     onAll = { selection.all(episodes.map { it.episode.episodeKey }) },
                     onNone = { selection.clear() },
-                    actions = listOf(
-                        "Playlist" to { viewModel.act(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear() },
-                        "Entfernen" to { viewModel.act(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear() },
-                        "Gehört" to { viewModel.act(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear() },
-                        "Ungehört" to { viewModel.act(SwipeAction.MARK_UNPLAYED, selection.keys.toList()); selection.clear() },
-                        "Laden" to { viewModel.act(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear() },
-                        "Datei weg" to { viewModel.act(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear() },
-                    ),
+                    actions = run {
+                        val played = episodes.filter { it.progressStatus == "COMPLETED" }.map { it.episode.episodeKey }.toSet()
+                        listOf(
+                            bulkLabel(SwipeAction.ADD_PLAYLIST, selection.keys, played, playlistKeys, downloadKeys) to {
+                                viewModel.toggle(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear()
+                            },
+                            bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlistKeys, downloadKeys) to {
+                                viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
+                            },
+                            bulkLabel(SwipeAction.DOWNLOAD, selection.keys, played, playlistKeys, downloadKeys) to {
+                                viewModel.toggle(SwipeAction.DOWNLOAD, selection.keys.toList()); selection.clear()
+                            },
+                        )
+                    },
                 )
             }
         },
@@ -205,6 +224,8 @@ fun EpisodesScreen(
                     selected = selection.keys,
                     swipeStart = settings.swipeStart,
                     swipeEnd = settings.swipeEnd,
+                    playlistKeys = playlistKeys,
+                    downloadKeys = downloadKeys,
                     onSwipe = { action, key -> viewModel.act(action, listOf(key)) },
                     onUnsubscribe = { confirmUnsubscribe = true },
                 )
@@ -240,6 +261,8 @@ private fun EpisodeList(
     selected: Set<String>,
     swipeStart: SwipeAction,
     swipeEnd: SwipeAction,
+    playlistKeys: Set<String>,
+    downloadKeys: Set<String>,
     onSwipe: (SwipeAction, String) -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
@@ -291,9 +314,12 @@ private fun EpisodeList(
         }
         items(episodes, key = { it.episode.episodeKey }) { row ->
             val key = row.episode.episodeKey
+            val played = row.progressStatus == "COMPLETED"
+            val resolvedStart = swipeStart.resolved(played, key in playlistKeys, key in downloadKeys)
+            val resolvedEnd = swipeEnd.resolved(played, key in playlistKeys, key in downloadKeys)
             SwipeRow(
-                start = swipeStart,
-                end = swipeEnd,
+                start = resolvedStart,
+                end = resolvedEnd,
                 enabled = !selecting,
                 onAction = { onSwipe(it, key) },
             ) {
