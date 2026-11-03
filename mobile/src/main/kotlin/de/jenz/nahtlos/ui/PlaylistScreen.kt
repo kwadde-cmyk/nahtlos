@@ -40,8 +40,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import de.jenz.nahtlos.core.library.EpisodeCommands
+import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
+import de.jenz.nahtlos.core.sync.SettingsStore
+import de.jenz.nahtlos.playback.SwipeAction
 import de.jenz.nahtlos.playlist.PlaylistSort
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -52,7 +58,12 @@ import javax.inject.Inject
 @HiltViewModel
 class PlaylistViewModel @Inject constructor(
     private val playlists: PlaylistRepository,
+    private val commands: EpisodeCommands,
+    settingsStore: SettingsStore,
 ) : ViewModel() {
+    val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
+    private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
+    val undo = _undo.asSharedFlow()
     val playlist = playlists.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), de.jenz.nahtlos.playlist.ListeningPlaylist())
 
     fun generate(sinceEpochMs: Long) {
@@ -76,6 +87,10 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch { playlists.remove(episodeKey) }
     }
 
+    fun act(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
+    }
+
     fun setRemoveWhenFinished(enabled: Boolean) {
         viewModelScope.launch { playlists.setRemoveWhenFinished(enabled) }
     }
@@ -89,6 +104,10 @@ fun PlaylistScreen(
     viewModel: PlaylistViewModel = hiltViewModel(),
 ) {
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val selection = rememberSelection()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    UndoEffect(viewModel.undo, snackbar)
     var since by remember(playlist.sinceEpochMs) {
         mutableLongStateOf(if (playlist.sinceEpochMs > 0) playlist.sinceEpochMs else System.currentTimeMillis() - 7L * 86_400_000L)
     }
@@ -104,6 +123,22 @@ fun PlaylistScreen(
                     }
                 },
             )
+        },
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
+        bottomBar = {
+            if (selection.active) {
+                SelectionBar(
+                    count = selection.keys.size,
+                    onAll = { selection.all(playlist.items.map { it.episodeKey }) },
+                    onNone = { selection.clear() },
+                    actions = listOf(
+                        "Entfernen" to { viewModel.act(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear() },
+                        "Gehört" to { viewModel.act(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear() },
+                        "Ungehört" to { viewModel.act(SwipeAction.MARK_UNPLAYED, selection.keys.toList()); selection.clear() },
+                        "Datei weg" to { viewModel.act(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear() },
+                    ),
+                )
+            }
         },
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
@@ -136,6 +171,20 @@ fun PlaylistScreen(
                 }
             }
             itemsIndexed(playlist.items, key = { _, item -> item.episodeKey }) { index, item ->
+                SwipeRow(
+                    start = settings.swipeStart,
+                    end = settings.swipeEnd,
+                    enabled = !selection.active,
+                    onAction = { viewModel.act(it, listOf(item.episodeKey)) },
+                ) {
+                SelectableRow(
+                    selected = item.episodeKey in selection.keys,
+                    selecting = selection.active,
+                    onClick = {
+                        if (selection.active) selection.toggle(item.episodeKey) else onPlay(item.episodeKey)
+                    },
+                    onLongPress = { selection.start(item.episodeKey) },
+                ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -162,6 +211,8 @@ fun PlaylistScreen(
                     IconButton(onClick = { viewModel.remove(item.episodeKey) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Entfernen")
                     }
+                }
+                }
                 }
             }
         }

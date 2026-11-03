@@ -7,6 +7,7 @@ import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import de.jenz.nahtlos.playback.PlaybackTuning
+import de.jenz.nahtlos.playback.SwipeAction
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -28,6 +29,8 @@ data class ServerSettings(
     val skipForwardSec: Int = PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC,
     val skipSilence: Boolean = false,
     val volumeBoost: Boolean = false,
+    val swipeStart: SwipeAction = SwipeAction.START_DEFAULT,
+    val swipeEnd: SwipeAction = SwipeAction.END_DEFAULT,
 ) {
     val configured: Boolean
         get() = (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) && token.isNotBlank()
@@ -59,6 +62,14 @@ class SettingsStore @Inject constructor(
             skipForwardSec = PlaybackTuning.clampSkipSeconds(prefs.getInt(KEY_SKIP_FORWARD, PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC)),
             skipSilence = prefs.getBoolean(KEY_SILENCE, false),
             volumeBoost = prefs.getBoolean(KEY_BOOST, false),
+            swipeStart = SwipeAction.fromId(prefs.getString(KEY_SWIPE_START, null)).let {
+                if (prefs.getString(KEY_SWIPE_START, null) == null) SwipeAction.START_DEFAULT else it
+            },
+            swipeEnd = if (prefs.getString(KEY_SWIPE_END, null) == null) {
+                SwipeAction.END_DEFAULT
+            } else {
+                SwipeAction.fromId(prefs.getString(KEY_SWIPE_END, null))
+            },
         )
     }
 
@@ -75,6 +86,8 @@ class SettingsStore @Inject constructor(
         skipForwardSec: Int = read().skipForwardSec,
         skipSilence: Boolean = read().skipSilence,
         volumeBoost: Boolean = read().volumeBoost,
+        swipeStart: SwipeAction = read().swipeStart,
+        swipeEnd: SwipeAction = read().swipeEnd,
     ) {
         val normalized = serverUrl.trim().trimEnd('/').let { url ->
             if (url.isEmpty()) "" else EpisodeKeys.normalizeFeedUrl(url)
@@ -92,6 +105,8 @@ class SettingsStore @Inject constructor(
             .putInt(KEY_SKIP_FORWARD, PlaybackTuning.clampSkipSeconds(skipForwardSec))
             .putBoolean(KEY_SILENCE, skipSilence)
             .putBoolean(KEY_BOOST, volumeBoost)
+            .putString(KEY_SWIPE_START, swipeStart.id)
+            .putString(KEY_SWIPE_END, swipeEnd.id)
             .apply()
     }
 
@@ -123,5 +138,7 @@ class SettingsStore @Inject constructor(
         private const val KEY_SKIP_FORWARD = "skipForwardSec"
         private const val KEY_SILENCE = "skipSilence"
         private const val KEY_BOOST = "volumeBoost"
+        private const val KEY_SWIPE_START = "swipeStart"
+        private const val KEY_SWIPE_END = "swipeEnd"
     }
 }

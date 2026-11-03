@@ -58,6 +58,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SwipeChoices(selected: de.jenz.nahtlos.playback.SwipeAction, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+        de.jenz.nahtlos.playback.SwipeAction.entries.forEach { action ->
+            TextButton(onClick = { onSelect(action.id) }) {
+                Text(if (action == selected) "● ${action.label}" else action.label)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun HorizonChoices(selected: String, onSelect: (String) -> Unit) {
@@ -172,6 +184,10 @@ fun SettingsScreen(
                 horizon = id
                 viewModel.setEpisodeHorizon(id)
             }
+            Text("Wischen nach rechts", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+            SwipeChoices(state.swipeStart) { viewModel.setSwipe(start = true, it) }
+            Text("Wischen nach links", style = MaterialTheme.typography.titleSmall)
+            SwipeChoices(state.swipeEnd) { viewModel.setSwipe(start = false, it) }
             Text("Wiedergabe", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             Text(
                 "Tempo ${"%.1f".format(state.playbackSpeed)}×, Sprung zurück ${state.skipBackSec}s, vor ${state.skipForwardSec}s. Pro Podcast lässt sich das im Player überschreiben.",

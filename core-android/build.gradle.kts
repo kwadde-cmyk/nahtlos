@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
@@ -22,6 +23,14 @@ android {
     }
     buildFeatures {
         buildConfig = false
+    }
+    buildTypes {
+        release {
+            consumerProguardFiles("consumer-rules.pro")
+        }
+    }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -46,7 +55,13 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.coil)
+    testImplementation(libs.kotlin.test.junit5)
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:${libs.versions.junit.get()}")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core:1.6.1")
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test> {
+    useJUnitPlatform()
 }

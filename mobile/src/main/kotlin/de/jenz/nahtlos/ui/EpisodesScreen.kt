@@ -50,11 +50,18 @@ import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.persons
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.library.EpisodeCommands
+import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playback.PlayerConnection
+import de.jenz.nahtlos.core.sync.ServerSettings
+import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
+import de.jenz.nahtlos.playback.SwipeAction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -66,6 +73,8 @@ class EpisodesViewModel @Inject constructor(
     private val feeds: FeedRepository,
     private val sync: SyncRepository,
     private val player: PlayerConnection,
+    private val commands: EpisodeCommands,
+    settingsStore: SettingsStore,
 ) : ViewModel() {
     private val podcastId: String = checkNotNull(savedState["podcastId"])
     val podcast = feeds.observePodcast(podcastId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -74,6 +83,9 @@ class EpisodesViewModel @Inject constructor(
     val refreshing = _refreshing.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
+    val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
+    private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
+    val undo = _undo.asSharedFlow()
 
     init {
         refresh(force = false)
@@ -97,6 +109,12 @@ class EpisodesViewModel @Inject constructor(
         player.play(episodeKey)
     }
 
+    fun act(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch {
+            commands.run(action, keys)?.let { _undo.emit(it) }
+        }
+    }
+
     fun unsubscribe(onDone: () -> Unit) {
         viewModelScope.launch {
             val feedUrl = feeds.getPodcast(podcastId)?.feedUrl
@@ -118,6 +136,10 @@ fun EpisodesScreen(
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val selection = rememberSelection()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    UndoEffect(viewModel.undo, snackbar)
     var confirmUnsubscribe by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -130,11 +152,34 @@ fun EpisodesScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.refresh(force = true) }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Feed aktualisieren")
+                    if (selection.active) {
+                        TextButton(onClick = { selection.all(episodes.map { it.episode.episodeKey }) }) { Text("Alle") }
+                        TextButton(onClick = { selection.clear() }) { Text("Fertig") }
+                    } else {
+                        IconButton(onClick = { viewModel.refresh(force = true) }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Feed aktualisieren")
+                        }
                     }
                 },
             )
+        },
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
+        bottomBar = {
+            if (selection.active) {
+                SelectionBar(
+                    count = selection.keys.size,
+                    onAll = { selection.all(episodes.map { it.episode.episodeKey }) },
+                    onNone = { selection.clear() },
+                    actions = listOf(
+                        "Playlist" to { viewModel.act(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear() },
+                        "Entfernen" to { viewModel.act(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear() },
+                        "Gehört" to { viewModel.act(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear() },
+                        "Ungehört" to { viewModel.act(SwipeAction.MARK_UNPLAYED, selection.keys.toList()); selection.clear() },
+                        "Laden" to { viewModel.act(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear() },
+                        "Datei weg" to { viewModel.act(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear() },
+                    ),
+                )
+            }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
@@ -151,9 +196,17 @@ fun EpisodesScreen(
                     refreshing = refreshing,
                     error = error,
                     onPlay = { key ->
-                        viewModel.play(key)
-                        onOpenPlayer(key)
+                        if (selection.active) selection.toggle(key) else {
+                            viewModel.play(key)
+                            onOpenPlayer(key)
+                        }
                     },
+                    onLongPress = { key -> selection.start(key) },
+                    selecting = selection.active,
+                    selected = selection.keys,
+                    swipeStart = settings.swipeStart,
+                    swipeEnd = settings.swipeEnd,
+                    onSwipe = { action, key -> viewModel.act(action, listOf(key)) },
                     onUnsubscribe = { confirmUnsubscribe = true },
                 )
             }
@@ -183,6 +236,12 @@ private fun EpisodeList(
     refreshing: Boolean,
     error: String?,
     onPlay: (String) -> Unit,
+    onLongPress: (String) -> Unit,
+    selecting: Boolean,
+    selected: Set<String>,
+    swipeStart: SwipeAction,
+    swipeEnd: SwipeAction,
+    onSwipe: (SwipeAction, String) -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
     LazyColumn(
@@ -231,7 +290,22 @@ private fun EpisodeList(
             }
         }
         items(episodes, key = { it.episode.episodeKey }) { row ->
-            EpisodeRowItem(row, onClick = { onPlay(row.episode.episodeKey) })
+            val key = row.episode.episodeKey
+            SwipeRow(
+                start = swipeStart,
+                end = swipeEnd,
+                enabled = !selecting,
+                onAction = { onSwipe(it, key) },
+            ) {
+                SelectableRow(
+                    selected = key in selected,
+                    selecting = selecting,
+                    onClick = { onPlay(key) },
+                    onLongPress = { onLongPress(key) },
+                ) {
+                    EpisodeRowItem(row)
+                }
+            }
         }
         item {
             TextButton(onClick = onUnsubscribe, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -242,12 +316,11 @@ private fun EpisodeList(
 }
 
 @Composable
-private fun EpisodeRowItem(row: EpisodeRow, onClick: () -> Unit) {
+private fun EpisodeRowItem(row: EpisodeRow) {
     val episode = row.episode
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         val extra = episode.extras()

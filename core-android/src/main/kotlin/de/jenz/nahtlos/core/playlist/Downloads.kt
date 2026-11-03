@@ -100,7 +100,34 @@ class DownloadStore @Inject constructor(
         row?.filePath?.let { path -> File(path).delete() }
         db.downloads().delete(episodeKey)
     }
+
+    fun observe() = db.downloads().observeRows()
+
+    /** Moves the file aside so a snackbar can restore it. [commit] deletes the aside copy. */
+    suspend fun park(episodeKey: String): ParkedDownload? {
+        val row = db.downloads().get(episodeKey) ?: return null
+        val file = File(row.filePath)
+        val aside = File(file.path + ".trash")
+        if (file.isFile) file.renameTo(aside)
+        db.downloads().delete(episodeKey)
+        return ParkedDownload(row, file, aside)
+    }
+
+    suspend fun restore(parked: ParkedDownload) {
+        if (parked.aside.isFile) parked.aside.renameTo(parked.file)
+        db.downloads().upsert(parked.row)
+    }
+
+    fun discard(parked: ParkedDownload) {
+        parked.aside.delete()
+    }
 }
+
+data class ParkedDownload(
+    val row: DownloadEntity,
+    val file: File,
+    val aside: File,
+)
 
 class PlaylistDownloadWorker(
     context: Context,
