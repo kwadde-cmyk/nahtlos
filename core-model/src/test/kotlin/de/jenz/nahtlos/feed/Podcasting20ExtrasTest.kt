@@ -23,6 +23,13 @@ class Podcasting20ExtrasTest {
         assertEquals("https://cdn.example/hq.mp3", episode.enclosureUrl)
         assertEquals(73_000L, episode.soundbites.single().startMs)
         assertEquals("Bob", episode.value.single().name)
+        assertEquals(true, episode.value.single().fee)
+        assertEquals(696969L, episode.value.single().customKey)
+        assertEquals("ff", episode.value.single().customValue)
+        val window = episode.valueTimeSplits.single()
+        assertEquals(60_000L, window.startMs)
+        assertEquals(95, window.remotePercentage)
+        assertEquals("Gast", window.recipients.single().name)
         assertTrue(episode.descriptionHtml.contains("<p>"))
 
         val live = feed.episodes.single { it.live }
@@ -101,8 +108,11 @@ class Podcasting20ExtrasTest {
                   <podcast:soundbite startTime="73.0" duration="30.0">Ausschnitt</podcast:soundbite>
                   <content:encoded><![CDATA[<p>Notizen</p>]]></content:encoded>
                   <podcast:value type="lightning" method="keysend">
-                    <podcast:valueRecipient name="Bob" type="node" address="02def" split="40"/>
+                    <podcast:valueRecipient name="Bob" type="node" address="02def" split="40" fee="true" customKey="696969" customValue="ff"/>
                   </podcast:value>
+                  <podcast:valueTimeSplit startTime="60" duration="30" remotePercentage="95">
+                    <podcast:valueRecipient name="Gast" type="lnaddress" address="gast@example.com" split="100"/>
+                  </podcast:valueTimeSplit>
                 </item>
                 <podcast:liveItem status="live">
                   <title>Live-Runde</title>

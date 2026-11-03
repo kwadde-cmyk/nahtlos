@@ -15,6 +15,7 @@ import de.jenz.nahtlos.model.Soundbite
 import de.jenz.nahtlos.model.Trailer
 import de.jenz.nahtlos.model.TranscriptLink
 import de.jenz.nahtlos.model.ValueRecipient
+import de.jenz.nahtlos.model.ValueTimeSplit
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.Reader
@@ -188,6 +189,7 @@ class RssFeedParser(
             val persons = mutableListOf<Person>()
             val soundbites = mutableListOf<Soundbite>()
             val value = mutableListOf<ValueRecipient>()
+            val timeSplits = mutableListOf<ValueTimeSplit>()
             var season: Int? = null
             var episodeNumber: String? = null
             var bestBitrate = -1
@@ -244,6 +246,7 @@ class RssFeedParser(
                                 valueMethod = block.method
                                 valueSuggested = block.suggested
                             }
+                            "valueTimeSplit" -> valueTimeSplit()?.let { timeSplits += it }
                             "location" -> if (location == null) location = location()
                             "license" -> if (license == null) license = license()
                             "txt" -> txtTag()?.let { txt += it }
@@ -303,6 +306,7 @@ class RssFeedParser(
                 value = value,
                 valueMethod = valueMethod,
                 valueSuggested = valueSuggested,
+                valueTimeSplits = timeSplits,
                 alternates = if (enclosureUrl == null) alternates else {
                     if (alternates.any { it.url == enclosureUrl }) alternates
                     else listOf(AlternateSource(enclosureUrl, mimeType, bestBitrate.coerceAtLeast(0))) + alternates
@@ -385,6 +389,21 @@ class RssFeedParser(
             return PodTxt(purpose, value)
         }
 
+        fun valueTimeSplit(): ValueTimeSplit? {
+            val start = attr("startTime")?.toDoubleOrNull() ?: run {
+                skip()
+                return null
+            }
+            val duration = attr("duration")?.toDoubleOrNull() ?: 0.0
+            val percent = attr("remotePercentage")?.toIntOrNull() ?: 100
+            return ValueTimeSplit(
+                startMs = (start * 1000).toLong(),
+                durationMs = (duration * 1000).toLong(),
+                remotePercentage = percent.coerceIn(0, 100),
+                recipients = valueRecipients(),
+            )
+        }
+
         fun valueRecipients(): List<ValueRecipient> {
             val found = mutableListOf<ValueRecipient>()
             var depth = 1
@@ -397,6 +416,9 @@ class RssFeedParser(
                                 type = attr("type"),
                                 address = attr("address"),
                                 split = attr("split")?.toIntOrNull(),
+                                fee = attr("fee").equals("true", ignoreCase = true),
+                                customKey = attr("customKey")?.toLongOrNull(),
+                                customValue = attr("customValue"),
                             )
                             if (!recipient.address.isNullOrBlank() || !recipient.name.isNullOrBlank()) found += recipient
                             skip()

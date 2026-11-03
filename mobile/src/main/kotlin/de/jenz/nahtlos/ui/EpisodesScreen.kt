@@ -47,6 +47,8 @@ import de.jenz.nahtlos.core.db.EpisodeRow
 import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.persons
+import de.jenz.nahtlos.core.db.valueRecipients
+import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.library.EpisodeCommands
@@ -150,6 +152,11 @@ fun EpisodesScreen(
     val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
     val downloadKeys by viewModel.downloadKeys.collectAsStateWithLifecycle()
     val selection = rememberSelection()
+    val walletModel: WalletViewModel = hiltViewModel()
+    val wallet by walletModel.state.collectAsStateWithLifecycle()
+    val boostResult by walletModel.result.collectAsStateWithLifecycle()
+    val boostError by walletModel.error.collectAsStateWithLifecycle()
+    var boostOpen by remember { mutableStateOf(false) }
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     UndoEffect(viewModel.undo, snackbar)
     var confirmUnsubscribe by remember { mutableStateOf(false) }
@@ -228,7 +235,30 @@ fun EpisodesScreen(
                     downloadKeys = downloadKeys,
                     onSwipe = { action, key -> viewModel.act(action, listOf(key)) },
                     onUnsubscribe = { confirmUnsubscribe = true },
+                    onBoost = {
+                        walletModel.clearResult()
+                        boostOpen = true
+                    },
                 )
+            }
+            if (boostOpen && podcast != null) {
+                    BoostDialog(
+                        podcastTitle = podcast!!.title,
+                        episodeTitle = null,
+                        feedUrl = podcast!!.feedUrl,
+                        feedGuid = podcast!!.podcastGuid,
+                        episodeGuid = null,
+                        positionMs = null,
+                        episodeRecipients = emptyList(),
+                        timeSplits = emptyList(),
+                        channelRecipients = podcast!!.valueRecipients(),
+                        wallet = wallet,
+                        busy = wallet.busy,
+                        result = boostResult,
+                        error = boostError,
+                        onDismiss = { boostOpen = false },
+                        onSend = walletModel::send,
+                    )
             }
         }
     }
@@ -265,6 +295,7 @@ private fun EpisodeList(
     downloadKeys: Set<String>,
     onSwipe: (SwipeAction, String) -> Unit,
     onUnsubscribe: () -> Unit,
+    onBoost: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.widthIn(max = 840.dp),
@@ -285,6 +316,9 @@ private fun EpisodeList(
                             Text(byline, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                }
+                if (podcast.valueRecipients().isNotEmpty()) {
+                    TextButton(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
                 }
                 if (podcast.description.isNotBlank()) {
                     Text(

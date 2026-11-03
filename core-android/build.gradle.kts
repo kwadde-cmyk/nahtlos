@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.coroutines.guava)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.androidx.security)
     implementation(libs.coil)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:${libs.versions.junit.get()}")

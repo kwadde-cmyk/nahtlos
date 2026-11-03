@@ -74,6 +74,8 @@ import de.jenz.nahtlos.model.Soundbite
 import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.model.TranscriptLink
 import de.jenz.nahtlos.model.ValueRecipient
+import de.jenz.nahtlos.model.ValueTimeSplit
+import de.jenz.nahtlos.core.wallet.WalletViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -91,6 +93,13 @@ data class EpisodeDetails(
     val soundbites: List<Soundbite> = emptyList(),
     val value: List<ValueRecipient> = emptyList(),
     val valueSuggested: String? = null,
+    val episodeValue: List<ValueRecipient> = emptyList(),
+    val timeSplits: List<ValueTimeSplit> = emptyList(),
+    val channelValue: List<ValueRecipient> = emptyList(),
+    val feedUrl: String? = null,
+    val episodeGuid: String? = null,
+    val episodeTitle: String = "",
+    val podcastTitle: String = "",
     val funding: List<FundingLink> = emptyList(),
     val alternates: List<AlternateSource> = emptyList(),
     val location: PodLocation? = null,
@@ -162,6 +171,13 @@ class PlayerViewModel @Inject constructor(
                 soundbites = extra.soundbites,
                 value = extra.value.ifEmpty { podcast?.valueRecipients().orEmpty() },
                 valueSuggested = extra.valueSuggested ?: show?.valueSuggested,
+                episodeValue = extra.value,
+                timeSplits = extra.valueTimeSplits,
+                channelValue = podcast?.valueRecipients().orEmpty(),
+                feedUrl = podcast?.feedUrl,
+                episodeGuid = episode.guid,
+                episodeTitle = episode.title,
+                podcastTitle = podcast?.title.orEmpty(),
                 funding = podcast?.funding() ?: emptyList(),
                 alternates = extra.alternates,
                 location = extra.location ?: show?.location,
@@ -188,6 +204,11 @@ class PlayerViewModel @Inject constructor(
 fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel()) {
     val playback by viewModel.playback.collectAsStateWithLifecycle()
     val details by viewModel.details.collectAsStateWithLifecycle()
+    val walletModel: WalletViewModel = hiltViewModel()
+    val wallet by walletModel.state.collectAsStateWithLifecycle()
+    val boostResult by walletModel.result.collectAsStateWithLifecycle()
+    val boostError by walletModel.error.collectAsStateWithLifecycle()
+    var boostOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     Scaffold(
         topBar = {
@@ -300,7 +321,30 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                         onSeek = viewModel::seekTo,
                         onSubscribe = viewModel::subscribe,
                         onUseEnclosure = viewModel::useEnclosure,
+                        onBoost = {
+                            walletModel.clearResult()
+                            boostOpen = true
+                        },
                     )
+                    if (boostOpen) {
+                        BoostDialog(
+                            podcastTitle = details.podcastTitle,
+                            episodeTitle = details.episodeTitle,
+                            feedUrl = details.feedUrl,
+                            feedGuid = details.podcastGuid,
+                            episodeGuid = details.episodeGuid,
+                            positionMs = playback.positionMs,
+                            episodeRecipients = details.episodeValue,
+                            timeSplits = details.timeSplits,
+                            channelRecipients = details.channelValue,
+                            wallet = wallet,
+                            busy = wallet.busy,
+                            result = boostResult,
+                            error = boostError,
+                            onDismiss = { boostOpen = false },
+                            onSend = walletModel::send,
+                        )
+                    }
                 }
             }
         }

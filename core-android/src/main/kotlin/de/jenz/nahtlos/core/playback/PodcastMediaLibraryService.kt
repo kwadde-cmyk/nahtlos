@@ -28,6 +28,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.wallet.BoostService
+import de.jenz.nahtlos.wallet.SecretScrub
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
@@ -53,6 +55,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var playlists: PlaylistRepository
     @Inject lateinit var downloads: DownloadScheduler
     @Inject lateinit var feeds: FeedRepository
+    @Inject lateinit var boosts: BoostService
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var player: ExoPlayer? = null
@@ -213,6 +216,22 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private fun quickBoost() {
+        val key = player?.currentMediaItem?.mediaId
+        val position = player?.currentPosition ?: 0L
+        if (key.isNullOrBlank() || de.jenz.nahtlos.core.playback.LibraryIds.isFolder(key)) {
+            AppLog.record("Wallet", "Schnell-Boost: keine Folge in der Wiedergabe.")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val message = runCatching { boosts.quickBoost(key, position) }.fold(
+                { view -> "Schnell-Boost ${view.totalSats} sats, ${view.lines.count { !it.error }} gesendet." },
+                { SecretScrub.message(it.message) },
+            )
+            AppLog.record("Wallet", message)
+        }
+    }
+
     private fun carButtons(): ImmutableList<CommandButton> = ImmutableList.of(
         actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK),
         actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD),
@@ -220,6 +239,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS),
         actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS),
         actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT),
+        actionButton("Boost", SessionActions.QUICK_BOOST, CommandButton.ICON_HEART_FILLED),
     )
 
     private fun actionButton(name: String, action: String, icon: Int): CommandButton =
@@ -241,6 +261,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             SessionActions.BOOST,
             SessionActions.INTRO,
             SessionActions.OUTRO,
+            SessionActions.QUICK_BOOST,
         ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(commands.build())
@@ -292,6 +313,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 SessionActions.BOOST -> effects?.toggleBoost()
                 SessionActions.INTRO -> effects?.bumpTrim(intro = true)
                 SessionActions.OUTRO -> effects?.bumpTrim(intro = false)
+                SessionActions.QUICK_BOOST -> quickBoost()
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
