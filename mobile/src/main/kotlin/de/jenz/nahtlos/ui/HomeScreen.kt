@@ -26,17 +26,18 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.runtime.rememberCoroutineScope
 import android.net.Uri
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -210,6 +211,7 @@ fun HomeScreen(
     val selection = rememberSelection()
     var confirmUnsubscribe by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
+    var showOverflow by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -243,10 +245,10 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("Nahtlos") },
                 actions = {
-                    IconButton(onClick = onOpenPlaylist) {
-                        Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist")
+                    LabeledIconButton(label = "Playlist", onClick = onOpenPlaylist) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Playlist")
                     }
-                    IconButton(onClick = onOpenDownloads) {
+                    LabeledIconButton(label = "Downloads", onClick = onOpenDownloads) {
                         Icon(Icons.Filled.Download, contentDescription = "Downloads")
                     }
                     if (selection.active) {
@@ -254,22 +256,39 @@ fun HomeScreen(
                         TextButton(onClick = { confirmUnsubscribe = true }, enabled = selection.keys.isNotEmpty()) { Text("Entfernen") }
                         TextButton(onClick = { selection.clear() }) { Text("Fertig") }
                     }
-                    IconButton(onClick = { importOpml.launch(arrayOf("text/*", "application/xml", "application/octet-stream")) }) {
-                        Icon(Icons.Filled.Add, contentDescription = "OPML importieren")
+                    Box {
+                        LabeledIconButton(label = "Mehr", onClick = { showOverflow = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Mehr")
+                        }
+                        DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
+                            DropdownMenuItem(
+                                text = { Text("OPML importieren") },
+                                onClick = {
+                                    showOverflow = false
+                                    importOpml.launch(arrayOf("text/*", "application/xml", "application/octet-stream"))
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("OPML exportieren") },
+                                onClick = {
+                                    showOverflow = false
+                                    exportOpml.launch("nahtlos.opml")
+                                },
+                            )
+                        }
                     }
-                    IconButton(onClick = { exportOpml.launch("nahtlos.opml") }) {
-                        Icon(Icons.Filled.Upload, contentDescription = "OPML exportieren")
-                    }
-                    IconButton(onClick = onOpenSettings) {
+                    LabeledIconButton(label = "Einstellungen", onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Einstellungen")
                     }
                 },
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAdd = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "RSS-Feed hinzufügen")
-            }
+            ExtendedFloatingActionButton(
+                onClick = { showAdd = true },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Podcast hinzufügen") },
+            )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
@@ -283,6 +302,7 @@ fun HomeScreen(
             }
             RefreshBanner(podcasts, onRetryFailed = viewModel::retryFailed)
             StatusBanner(status) { viewModel.onForeground() }
+            if (podcasts.isNotEmpty() || continueRows.isNotEmpty()) GestureHint()
             when {
                 status.syncing && podcasts.isEmpty() && continueRows.isEmpty() -> LoadingState("Abos werden geholt …")
                 podcasts.isEmpty() && continueRows.isEmpty() -> EmptyLibrary { showAdd = true }
@@ -400,12 +420,14 @@ private fun EmptyLibrary(onAdd: () -> Unit) {
         Text("Noch kein Podcast", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Füge eine RSS-Adresse hinzu. Kapitel, Transkript-Link und GUID werden mitgelesen, die Wiedergabeposition geht mit aufs Auto.",
+            "Importiere eine OPML-Datei über ⋮ oder füge einen Podcast hinzu.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onAdd) { Text("RSS-Feed eintragen") }
+        TextButton(onClick = onAdd) { Text("Podcast hinzufügen") }
+        Spacer(Modifier.height(12.dp))
+        GestureHint(Modifier)
     }
 }
 
@@ -626,7 +648,10 @@ fun MiniPlayer(snapshot: PlayerSnapshot, onClick: () -> Unit, onToggle: () -> Un
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        IconButton(onClick = onToggle) {
+        LabeledIconButton(
+            label = if (snapshot.isPlaying) "Pause" else "Wiedergabe",
+            onClick = onToggle,
+        ) {
             Icon(
                 if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                 contentDescription = if (snapshot.isPlaying) "Pause" else "Wiedergabe",

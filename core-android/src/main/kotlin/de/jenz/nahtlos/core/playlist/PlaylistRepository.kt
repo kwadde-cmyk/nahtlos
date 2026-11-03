@@ -65,6 +65,13 @@ class PlaylistRepository @Inject constructor(
         write(existing.copy(items = PlaylistEditor.move(existing.items, index, delta)), sync = true)
     }
 
+    suspend fun reorder(keys: List<String>) {
+        val existing = current()
+        val items = PlaylistEditor.reorder(existing.items, keys)
+        if (items.map { it.episodeKey } == existing.items.map { it.episodeKey }) return
+        write(existing.copy(items = items), sync = true)
+    }
+
     suspend fun add(entries: List<PlaylistEntry>) {
         if (entries.isEmpty()) return
         val existing = current()

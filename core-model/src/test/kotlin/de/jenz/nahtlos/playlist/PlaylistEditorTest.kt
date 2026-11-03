@@ -55,6 +55,16 @@ class PlaylistEditorTest {
     }
 
     @Test
+    fun reorderFollowsKeysAndKeepsRowsThatWereNotListed() {
+        val start = PlaylistEditor.generate(episodes, day, PlaylistSort.OLDEST_FIRST)
+        val reordered = PlaylistEditor.reorder(start, listOf("b", "a", "c"))
+        assertEquals(listOf("b", "a", "c"), reordered.map { it.episodeKey })
+        val partial = PlaylistEditor.reorder(start, listOf("c"))
+        assertEquals(listOf("c", "a", "b"), partial.map { it.episodeKey })
+        assertEquals(start, PlaylistEditor.reorder(start, emptyList()))
+    }
+
+    @Test
     fun reorderAndRemoveAreStable() {
         val start = PlaylistEditor.generate(episodes, day, PlaylistSort.OLDEST_FIRST)
         val moved = PlaylistEditor.move(start, index = 0, delta = 2)

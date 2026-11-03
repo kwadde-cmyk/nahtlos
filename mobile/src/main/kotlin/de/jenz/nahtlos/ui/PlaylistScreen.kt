@@ -5,19 +5,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -26,8 +25,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,6 +55,8 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import javax.inject.Inject
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @HiltViewModel
 class PlaylistViewModel @Inject constructor(
@@ -79,12 +82,8 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch { playlists.setSort(next) }
     }
 
-    fun move(index: Int, delta: Int) {
-        viewModelScope.launch { playlists.move(index, delta) }
-    }
-
-    fun remove(episodeKey: String) {
-        viewModelScope.launch { playlists.remove(episodeKey) }
+    fun reorder(keys: List<String>) {
+        viewModelScope.launch { playlists.reorder(keys) }
     }
 
     fun act(action: SwipeAction, keys: List<String>) {
@@ -118,7 +117,7 @@ fun PlaylistScreen(
             TopAppBar(
                 title = { Text("Playlist") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    LabeledIconButton(label = "Zurück", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
                     }
                 },
@@ -141,78 +140,128 @@ fun PlaylistScreen(
             }
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            item {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        val dragging = remember { mutableStateOf(false) }
+        val pendingKeys = remember { mutableStateOf<List<String>?>(null) }
+        val latestKeys = remember { mutableStateOf(playlist.items.map { it.episodeKey }) }
+        latestKeys.value = playlist.items.map { it.episodeKey }
+        val order = remember { mutableStateListOf<de.jenz.nahtlos.playlist.PlaylistEntry>() }
+        if (order.isEmpty() && playlist.items.isNotEmpty() && pendingKeys.value == null && !dragging.value) {
+            order.addAll(playlist.items)
+        }
+        LaunchedEffect(playlist.items) {
+            val remote = playlist.items.map { it.episodeKey }
+            val waiting = pendingKeys.value
+            if (waiting != null && remote != waiting) return@LaunchedEffect
+            pendingKeys.value = null
+            if (dragging.value) return@LaunchedEffect
+            order.clear()
+            order.addAll(playlist.items)
+        }
+        val listState = rememberLazyListState()
+        val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+            if (from.index in order.indices && to.index in order.indices) {
+                order.add(to.index, order.removeAt(from.index))
+            }
+        }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(
+                    "Alle neuen Folgen der Abos seit einem Datum. Die Reihenfolge geht mit aufs Auto, und nach dem Ende startet die nächste Folge.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { showPicker = true }) {
+                    Text("Seit ${formatDate(since)}")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { viewModel.generate(since) }) { Text("Erzeugen") }
+                    TextButton(onClick = viewModel::refresh) { Text("Neue Folgen dazu") }
+                    TextButton(onClick = viewModel::toggleSort) {
+                        Text(if (playlist.sort == PlaylistSort.OLDEST_FIRST) "Älteste zuerst" else "Neueste zuerst")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Fertige Folgen aus der Playlist nehmen", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = playlist.removeWhenFinished,
+                        onCheckedChange = viewModel::setRemoveWhenFinished,
+                    )
+                }
+                GestureHint(Modifier.padding(top = 4.dp))
+                if (order.isEmpty()) {
                     Text(
-                        "Alle neuen Folgen der Abos seit einem Datum. Die Reihenfolge geht mit aufs Auto, und nach dem Ende startet die nächste Folge.",
+                        "Noch keine Folgen. Wähle ein Datum und tippe auf „Erzeugen“, oder öffne einen Podcast und wische eine Folge zur Playlist. Langes Drücken wählt mehrere.",
+                        modifier = Modifier.padding(top = 12.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(onClick = { showPicker = true }) {
-                        Text("Seit ${formatDate(since)}")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { viewModel.generate(since) }) { Text("Erzeugen") }
-                        TextButton(onClick = viewModel::refresh) { Text("Neue Folgen dazu") }
-                        TextButton(onClick = viewModel::toggleSort) {
-                            Text(if (playlist.sort == PlaylistSort.OLDEST_FIRST) "Älteste zuerst" else "Neueste zuerst")
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Fertige Folgen aus der Playlist nehmen", modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = playlist.removeWhenFinished,
-                            onCheckedChange = viewModel::setRemoveWhenFinished,
-                        )
-                    }
-                    if (playlist.items.isEmpty()) {
-                        Text("Noch keine Folgen in der Playlist.", modifier = Modifier.padding(top = 12.dp))
-                    }
+                } else {
+                    Text(
+                        "Am Griff links ziehen sortiert. Wischen nimmt die Folge heraus, langes Drücken wählt mehrere.",
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-            itemsIndexed(playlist.items, key = { _, item -> item.episodeKey }) { index, item ->
-                SwipeRow(
-                    start = settings.swipeStart,
-                    end = settings.swipeEnd,
-                    enabled = !selection.active,
-                    onAction = { viewModel.act(it, listOf(item.episodeKey)) },
-                ) {
-                SelectableRow(
-                    selected = item.episodeKey in selection.keys,
-                    selecting = selection.active,
-                    onClick = {
-                        if (selection.active) selection.toggle(item.episodeKey) else onPlay(item.episodeKey)
-                    },
-                    onLongPress = { selection.start(item.episodeKey) },
-                ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                        Text(item.title.ifBlank { item.episodeKey }, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            listOf(item.podcastTitle, formatDate(item.publishedAt)).filter { it.isNotBlank() }.joinToString(" · "),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                items(order, key = { it.episodeKey }) { item ->
+                    ReorderableItem(reorderState, key = item.episodeKey, enabled = !selection.active) { _ ->
+                        SwipeRow(
+                            start = settings.swipeStart,
+                            end = settings.swipeEnd,
+                            enabled = !selection.active && !dragging.value,
+                            onAction = { viewModel.act(it, listOf(item.episodeKey)) },
+                        ) {
+                            SelectableRow(
+                                selected = item.episodeKey in selection.keys,
+                                selecting = selection.active,
+                                onClick = {
+                                    if (selection.active) selection.toggle(item.episodeKey) else onPlay(item.episodeKey)
+                                },
+                                onLongPress = { selection.start(item.episodeKey) },
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.DragIndicator,
+                                        contentDescription = "Reihenfolge ändern",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .draggableHandle(
+                                                enabled = !selection.active,
+                                                onDragStarted = { dragging.value = true },
+                                                onDragStopped = {
+                                                    val keys = order.map { it.episodeKey }
+                                                    dragging.value = false
+                                                    if (keys == latestKeys.value) {
+                                                        pendingKeys.value = null
+                                                    } else {
+                                                        pendingKeys.value = keys
+                                                        viewModel.reorder(keys)
+                                                    }
+                                                },
+                                            )
+                                            .size(48.dp)
+                                            .padding(12.dp),
+                                    )
+                                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(item.title.ifBlank { item.episodeKey }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            listOf(item.podcastTitle, formatDate(item.publishedAt)).filter { it.isNotBlank() }.joinToString(" · "),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    LabeledIconButton(label = "Abspielen", onClick = { onPlay(item.episodeKey) }) {
+                                        Icon(Icons.Filled.PlayArrow, contentDescription = "Abspielen")
+                                    }
+                                }
+                            }
+                        }
                     }
-                    IconButton(onClick = { onPlay(item.episodeKey) }) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = "Abspielen")
-                    }
-                    IconButton(onClick = { viewModel.move(index, -1) }, enabled = index > 0) {
-                        Icon(Icons.Filled.ArrowUpward, contentDescription = "Nach oben")
-                    }
-                    IconButton(onClick = { viewModel.move(index, 1) }, enabled = index < playlist.items.lastIndex) {
-                        Icon(Icons.Filled.ArrowDownward, contentDescription = "Nach unten")
-                    }
-                    IconButton(onClick = { viewModel.remove(item.episodeKey) }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Entfernen")
-                    }
-                }
-                }
                 }
             }
         }

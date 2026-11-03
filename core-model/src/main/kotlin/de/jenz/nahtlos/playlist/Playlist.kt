@@ -114,6 +114,21 @@ object PlaylistEditor {
     fun resort(items: List<PlaylistEntry>, sort: PlaylistSort): List<PlaylistEntry> =
         items.sortedWith(entryComparator(sort))
 
+    fun reorder(items: List<PlaylistEntry>, keys: List<String>): List<PlaylistEntry> {
+        if (keys.isEmpty() || items.isEmpty()) return items
+        val byKey = items.associateBy { it.episodeKey }
+        val used = LinkedHashSet<String>()
+        val ordered = ArrayList<PlaylistEntry>(items.size)
+        for (key in keys) {
+            val entry = byKey[key] ?: continue
+            if (used.add(key)) ordered.add(entry)
+        }
+        for (entry in items) {
+            if (used.add(entry.episodeKey)) ordered.add(entry)
+        }
+        return ordered
+    }
+
     fun move(items: List<PlaylistEntry>, index: Int, delta: Int): List<PlaylistEntry> {
         val target = index + delta
         if (index !in items.indices || target !in items.indices) return items

@@ -110,6 +110,21 @@ class SettingsStore @Inject constructor(
             .apply()
     }
 
+    fun gesturesHintSeen(): Boolean = prefs.getBoolean(KEY_GESTURE_HINT, false)
+
+    fun markGesturesHintSeen() {
+        prefs.edit().putBoolean(KEY_GESTURE_HINT, true).apply()
+    }
+
+    fun observeGesturesHint(): Flow<Boolean> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == KEY_GESTURE_HINT) trySend(gesturesHintSeen())
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(gesturesHintSeen())
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun serverDeviceId(): String = prefs.getString(KEY_SERVER_DEVICE, "").orEmpty()
 
     fun saveServerDeviceId(id: String) {
@@ -140,5 +155,6 @@ class SettingsStore @Inject constructor(
         private const val KEY_BOOST = "volumeBoost"
         private const val KEY_SWIPE_START = "swipeStart"
         private const val KEY_SWIPE_END = "swipeEnd"
+        private const val KEY_GESTURE_HINT = "gesturesHintSeen"
     }
 }

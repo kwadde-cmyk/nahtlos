@@ -24,6 +24,7 @@ work = "2.10.0"
 zxing = "3.5.3"
 camerax = "1.4.1"
 concurrent = "1.2.0"
+reorderable = "2.5.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -55,6 +56,7 @@ camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = 
 camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "concurrent" }
 guava = { module = "com.google.guava:guava", version = "33.3.1-android" }
+reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
