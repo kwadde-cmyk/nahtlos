@@ -60,6 +60,19 @@ class SelectionState {
 @Composable
 fun rememberSelection(): SelectionState = remember { SelectionState() }
 
+fun bulkLabel(
+    action: SwipeAction,
+    keys: Collection<String>,
+    played: Set<String>,
+    inPlaylist: Set<String>,
+    downloaded: Set<String>,
+): String {
+    val labels = keys.map { key ->
+        action.resolved(key in played, key in inPlaylist, key in downloaded).label
+    }.distinct()
+    return if (labels.size == 1) labels.first() else action.label
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeRow(

@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.playlist
 
+import de.jenz.nahtlos.playback.SwipeAction
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -133,9 +134,28 @@ class PlaylistEditorTest {
         val newerStub = ListeningPlaylist(updatedAt = 200, deviceId = "car", sinceEpochMs = day, items = emptyList())
         assertEquals(local, PlaylistResolver.merge(local, newerStub))
         val cleared = local.copy(updatedAt = 200, deviceId = "car", items = emptyList(), excludedKeys = listOf("a"))
-        assertEquals(cleared, PlaylistResolver.merge(local, cleared))
+        assertEquals(local, PlaylistResolver.merge(local, cleared))
+        assertEquals(201L, PlaylistResolver.repairStamp(local, cleared))
+        assertEquals(null, PlaylistResolver.repairStamp(local, olderEmpty))
         val newerItems = local.copy(updatedAt = 180, deviceId = "car", items = listOf(entry("b", day * 2)))
         assertEquals(newerItems, PlaylistResolver.merge(local, newerItems))
+    }
+
+    @Test
+    fun undatedEpisodesStayInTheSinceDatePlaylist() {
+        val undated = candidate("x", publishedAt = 0, title = "Ohne Datum")
+        val playlist = PlaylistEditor.generate(episodes + undated, sinceEpochMs = day, PlaylistSort.OLDEST_FIRST)
+        assertEquals(listOf("x", "a", "c", "b"), playlist.map { it.episodeKey })
+    }
+
+    @Test
+    fun swipeTogglesAgainstTheCurrentState() {
+        assertEquals(SwipeAction.MARK_UNPLAYED, SwipeAction.MARK_PLAYED.resolved(played = true, inPlaylist = false, downloaded = false))
+        assertEquals(SwipeAction.MARK_PLAYED, SwipeAction.MARK_UNPLAYED.resolved(played = false, inPlaylist = false, downloaded = false))
+        assertEquals(SwipeAction.REMOVE_PLAYLIST, SwipeAction.ADD_PLAYLIST.resolved(played = false, inPlaylist = true, downloaded = false))
+        assertEquals(SwipeAction.ADD_PLAYLIST, SwipeAction.REMOVE_PLAYLIST.resolved(played = false, inPlaylist = false, downloaded = false))
+        assertEquals(SwipeAction.DELETE_DOWNLOAD, SwipeAction.DELETE_DOWNLOAD.resolved(played = false, inPlaylist = false, downloaded = true))
+        assertEquals(SwipeAction.DOWNLOAD, SwipeAction.DELETE_DOWNLOAD.resolved(played = false, inPlaylist = false, downloaded = false))
     }
 
     @Test

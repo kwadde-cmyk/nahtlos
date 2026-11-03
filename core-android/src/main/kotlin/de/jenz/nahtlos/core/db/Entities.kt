@@ -108,7 +108,7 @@ data class DownloadEntity(
 data class EpisodeCandidateRow(
     val episodeKey: String,
     val title: String,
-    val publishedAt: Long,
+    val publishedAt: Long?,
     val enclosureUrl: String,
     val podcastTitle: String,
     val feedUrl: String,

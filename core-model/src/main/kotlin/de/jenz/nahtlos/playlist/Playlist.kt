@@ -82,33 +82,33 @@ object PlaylistResolver {
             playlist.excludedKeys.isEmpty()
 
     /**
-     * A newer remote document that really cleared the queue: it names a device and
-     * lists the removed keys. An empty body from a server that has no items yet,
-     * or from a generate before the feeds arrived, is not a clear.
-     */
-    fun genuineClear(local: ListeningPlaylist, remote: ListeningPlaylist): Boolean =
-        local.items.isNotEmpty() &&
-            remote.items.isEmpty() &&
-            remote.updatedAt > local.updatedAt &&
-            remote.deviceId.isNotBlank() &&
-            remote.excludedKeys.isNotEmpty()
-
-    /**
      * [remote] null means the server has no playlist route or the body was not a playlist.
-     * An empty remote document never replaces local items unless [genuineClear].
+     * An empty remote document never replaces local items. A stale empty row on the server
+     * (often with a newer timestamp) is what wiped playlists until the database was reset.
      */
     fun merge(local: ListeningPlaylist, remote: ListeningPlaylist?): ListeningPlaylist {
         if (remote == null || isPlaceholder(remote)) return local
-        if (local.items.isNotEmpty() && remote.items.isEmpty() && !genuineClear(local, remote)) return local
+        if (local.items.isNotEmpty() && remote.items.isEmpty()) return local
         if (local.updatedAt <= 0L && local.items.isEmpty() && local.deviceId.isBlank()) return remote
         return pick(local, remote)
+    }
+
+    /**
+     * When the server holds an empty playlist that is newer than the local one, the next PUT
+     * must use a later [ListeningPlaylist.updatedAt] or the server keeps rejecting it.
+     * Returns null when a normal push of [local] is enough.
+     */
+    fun repairStamp(local: ListeningPlaylist, remote: ListeningPlaylist): Long? {
+        if (local.items.isEmpty() || remote.items.isNotEmpty() || isPlaceholder(remote)) return null
+        if (remote.updatedAt < local.updatedAt) return null
+        return remote.updatedAt + 1
     }
 
     /** What to keep after PUT. A rejected or empty server copy must not wipe local items. */
     fun afterPush(local: ListeningPlaylist, accepted: Boolean, stored: ListeningPlaylist?): ListeningPlaylist {
         if (stored == null) return local
         if (!accepted) return merge(local, stored)
-        if (stored.items.isEmpty() && local.items.isNotEmpty() && !genuineClear(local, stored)) return local
+        if (stored.items.isEmpty() && local.items.isNotEmpty()) return local
         return stored
     }
 }
@@ -122,7 +122,7 @@ object PlaylistEditor {
     ): List<PlaylistEntry> {
         return candidates
             .asSequence()
-            .filter { it.publishedAt >= sinceEpochMs }
+            .filter { it.publishedAt <= 0L || it.publishedAt >= sinceEpochMs }
             .filter { it.episodeKey !in excludedKeys }
             .distinctBy { it.episodeKey }
             .sortedWith(comparator(sort))

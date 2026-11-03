@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.db.DownloadRow
 import de.jenz.nahtlos.core.library.EpisodeCommands
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.sync.SettingsStore
@@ -36,6 +37,7 @@ import de.jenz.nahtlos.playback.SwipeAction
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -44,15 +46,24 @@ import javax.inject.Inject
 class DownloadsViewModel @Inject constructor(
     downloads: DownloadStore,
     private val commands: EpisodeCommands,
+    playlists: PlaylistRepository,
     settingsStore: SettingsStore,
 ) : ViewModel() {
     val rows = downloads.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
+    val playlistKeys = playlists.observe().map { playlist -> playlist.items.map { it.episodeKey }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val played = playlists.observePlayed()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
     val undo = _undo.asSharedFlow()
 
     fun act(action: SwipeAction, keys: List<String>) {
         viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
+    }
+
+    fun toggle(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
     }
 }
 
@@ -65,6 +76,9 @@ fun DownloadsScreen(
 ) {
     val rows by viewModel.rows.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
+    val played by viewModel.played.collectAsStateWithLifecycle()
+    val downloaded = rows.map { it.episodeKey }.toSet()
     val selection = rememberSelection()
     val snackbar = remember { SnackbarHostState() }
     UndoEffect(viewModel.undo, snackbar)
@@ -98,9 +112,15 @@ fun DownloadsScreen(
                     onAll = { selection.all(rows.map { it.episodeKey }) },
                     onNone = { selection.clear() },
                     actions = listOf(
-                        "Datei weg" to { viewModel.act(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear() },
-                        "Playlist" to { viewModel.act(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear() },
-                        "Gehört" to { viewModel.act(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear() },
+                        bulkLabel(SwipeAction.DELETE_DOWNLOAD, selection.keys, played, playlistKeys, downloaded) to {
+                            viewModel.toggle(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear()
+                        },
+                        bulkLabel(SwipeAction.ADD_PLAYLIST, selection.keys, played, playlistKeys, downloaded) to {
+                            viewModel.toggle(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear()
+                        },
+                        bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlistKeys, downloaded) to {
+                            viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
+                        },
                     ),
                 )
             }
@@ -120,7 +140,7 @@ fun DownloadsScreen(
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 item { GestureHint() }
                 items(rows, key = { it.episodeKey }) { row ->
-                    DownloadLine(row, settings.swipeStart, settings.swipeEnd, selection, onPlay, viewModel::act)
+                    DownloadLine(row, settings.swipeStart, settings.swipeEnd, selection, playlistKeys, played, onPlay, viewModel::act)
                 }
             }
         }
@@ -133,10 +153,14 @@ private fun DownloadLine(
     start: SwipeAction,
     end: SwipeAction,
     selection: SelectionState,
+    playlistKeys: Set<String>,
+    played: Set<String>,
     onPlay: (String) -> Unit,
     onAction: (SwipeAction, List<String>) -> Unit,
 ) {
-    SwipeRow(start, end, enabled = !selection.active, onAction = { onAction(it, listOf(row.episodeKey)) }) {
+    val resolvedStart = start.resolved(row.episodeKey in played, row.episodeKey in playlistKeys, downloaded = true)
+    val resolvedEnd = end.resolved(row.episodeKey in played, row.episodeKey in playlistKeys, downloaded = true)
+    SwipeRow(resolvedStart, resolvedEnd, enabled = !selection.active, onAction = { onAction(it, listOf(row.episodeKey)) }) {
         SelectableRow(
             selected = row.episodeKey in selection.keys,
             selecting = selection.active,

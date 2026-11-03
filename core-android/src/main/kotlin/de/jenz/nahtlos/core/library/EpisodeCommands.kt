@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.core.library
 
 import de.jenz.nahtlos.core.db.NahtlosDatabase
+import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.playlist.ParkedDownload
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
@@ -23,8 +24,33 @@ class EpisodeCommands @Inject constructor(
     private val sync: SyncRepository,
     private val playlists: PlaylistRepository,
     private val downloads: DownloadStore,
+    private val scheduler: DownloadScheduler,
 ) {
-    suspend fun run(action: SwipeAction, keys: List<String>): Reversible? {
+    suspend fun run(action: SwipeAction, keys: List<String>): Reversible? = execute(action, keys)
+
+    /** Resolves each episode against its current state, so a bulk "Gehört" unmarks ones already played. */
+    suspend fun runToggled(action: SwipeAction, keys: List<String>): Reversible? {
+        val ids = keys.filter { it.isNotBlank() }.distinct()
+        if (ids.isEmpty()) return null
+        val inPlaylist = playlists.current().items.map { it.episodeKey }.toSet()
+        val groups = ids.groupBy { key ->
+            action.resolved(
+                played = db.progress().get(key)?.status == ProgressStatus.COMPLETED.name,
+                inPlaylist = key in inPlaylist,
+                downloaded = downloads.existingFile(key) != null,
+            )
+        }
+        val parts = groups.mapNotNull { (resolved, group) -> execute(resolved, group) }
+        if (parts.isEmpty()) return null
+        if (parts.size == 1) return parts.first()
+        return Reversible(
+            message = parts.joinToString { it.message },
+            undo = { parts.forEach { it.undo() } },
+            commit = { parts.forEach { it.commit() } },
+        )
+    }
+
+    private suspend fun execute(action: SwipeAction, keys: List<String>): Reversible? {
         val ids = keys.filter { it.isNotBlank() }.distinct()
         if (ids.isEmpty()) return null
         return when (action) {
@@ -33,6 +59,7 @@ class EpisodeCommands @Inject constructor(
             SwipeAction.ADD_PLAYLIST -> add(ids)
             SwipeAction.REMOVE_PLAYLIST -> remove(ids)
             SwipeAction.DELETE_DOWNLOAD -> deleteDownloads(ids)
+            SwipeAction.DOWNLOAD -> download(ids)
         }
     }
 
@@ -76,6 +103,11 @@ class EpisodeCommands @Inject constructor(
             message = "Aus der Playlist genommen",
             undo = { removed.sortedBy { it.index }.forEach { playlists.restore(it.value, it.index) } },
         )
+    }
+
+    private suspend fun download(keys: List<String>): Reversible {
+        keys.forEach { scheduler.enqueueEpisode(it) }
+        return Reversible(message = "Download gestartet", undo = {})
     }
 
     private suspend fun deleteDownloads(keys: List<String>): Reversible {
