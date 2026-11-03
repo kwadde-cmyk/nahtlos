@@ -50,6 +50,7 @@ class PlayerConnection @Inject constructor(
     val state: StateFlow<PlayerSnapshot> = _state.asStateFlow()
     private var controller: MediaController? = null
     private var connecting = false
+    private var connectWatch: Job? = null
     private var pendingKey: String? = null
     private var ticker: Job? = null
     private var sleepJob: Job? = null
@@ -72,19 +73,21 @@ class PlayerConnection @Inject constructor(
         connecting = true
         val token = SessionToken(context, ComponentName(context, PodcastMediaLibraryService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
-        scope.launch {
+        connectWatch?.cancel()
+        connectWatch = scope.launch {
             delay(8_000)
-            if (controller == null) {
+            if (controller == null && _state.value.error == null) {
                 connecting = false
-                val message = "Player antwortet nicht. Unter Android 13 die Benachrichtigung erlauben und es erneut versuchen."
+                val message = "Player antwortet nicht."
                 AppLog.record("Player", message)
                 _state.update { it.copy(error = message, buffering = false) }
             }
         }
         future.addListener({
             connecting = false
+            connectWatch?.cancel()
             val connected = runCatching { future.get() }.getOrElse { error ->
-                val message = error.message ?: "Player nicht erreichbar"
+                val message = connectFailure(error)
                 AppLog.record("Player", message, error)
                 _state.update { it.copy(error = message, buffering = false) }
                 return@addListener
@@ -109,6 +112,12 @@ class PlayerConnection @Inject constructor(
             return
         }
         startPlayback(current, episodeKey)
+    }
+
+    private fun connectFailure(error: Throwable): String {
+        val cause = generateSequence(error) { it.cause }.last()
+        val text = cause.message?.takeIf { it.isNotBlank() } ?: error.message?.takeIf { it.isNotBlank() }
+        return if (text.isNullOrBlank()) "Player nicht erreichbar" else text
     }
 
     private fun startPlayback(current: MediaController, episodeKey: String) {
