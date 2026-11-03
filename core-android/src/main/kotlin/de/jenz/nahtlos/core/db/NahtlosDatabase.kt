@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistDocEntity::class,
         DownloadEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class NahtlosDatabase : RoomDatabase() {
@@ -42,6 +42,11 @@ abstract class NahtlosDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE podcasts ADD COLUMN playbackJson TEXT NOT NULL DEFAULT '{}'")
                 db.execSQL("ALTER TABLE episodes ADD COLUMN extrasJson TEXT NOT NULL DEFAULT '{}'")
                 db.execSQL("ALTER TABLE episodes ADD COLUMN transcriptCache TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE podcasts ADD COLUMN extrasJson TEXT NOT NULL DEFAULT '{}'")
             }
         }
     }

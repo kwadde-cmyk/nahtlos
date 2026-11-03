@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import de.jenz.nahtlos.core.artwork.ArtworkStore
+import de.jenz.nahtlos.core.feed.PodcastIndexClient
+import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
@@ -62,6 +64,8 @@ class ImportOnDeviceTest {
             ChapterJsonParser(),
             SettingsStore(context),
             ArtworkStore(context, http),
+            DownloadStore(context, db),
+            PodcastIndexClient(Net(http)),
         )
         try {
             for (name in listOf("hopp-export.xml", "pocketcasts-export.xml")) {

@@ -182,6 +182,30 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Text("Podcast Index", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+            Text(
+                "Ohne Schlüssel und Secret bleibt die Suche aus. Die RSS-Adresse funktioniert weiter. Es wird nichts bezahlt und kein Wallet verbunden.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            var indexKey by remember(state.podcastIndexKey) { mutableStateOf(state.podcastIndexKey) }
+            var indexSecret by remember(state.podcastIndexSecret) { mutableStateOf(state.podcastIndexSecret) }
+            OutlinedTextField(
+                value = indexKey,
+                onValueChange = { indexKey = it },
+                label = { Text("API-Key") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            OutlinedTextField(
+                value = indexSecret,
+                onValueChange = { indexSecret = it },
+                label = { Text("API-Secret") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            TextButton(onClick = { viewModel.saveIndex(indexKey, indexSecret) }) { Text("Schlüssel speichern") }
             HorizonChoices(horizon) { id ->
                 horizon = id
                 viewModel.setEpisodeHorizon(id)

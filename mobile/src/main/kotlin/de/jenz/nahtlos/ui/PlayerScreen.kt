@@ -59,7 +59,14 @@ import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.funding
+import de.jenz.nahtlos.core.db.persons
 import de.jenz.nahtlos.core.db.valueRecipients
+import de.jenz.nahtlos.model.AlternateSource
+import de.jenz.nahtlos.model.PodLicense
+import de.jenz.nahtlos.model.PodLocation
+import de.jenz.nahtlos.model.PodTxt
+import de.jenz.nahtlos.model.RemoteItem
+import de.jenz.nahtlos.model.Trailer
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.Person
@@ -83,7 +90,19 @@ data class EpisodeDetails(
     val cues: List<TranscriptCue> = emptyList(),
     val soundbites: List<Soundbite> = emptyList(),
     val value: List<ValueRecipient> = emptyList(),
+    val valueSuggested: String? = null,
     val funding: List<FundingLink> = emptyList(),
+    val alternates: List<AlternateSource> = emptyList(),
+    val location: PodLocation? = null,
+    val license: PodLicense? = null,
+    val txt: List<PodTxt> = emptyList(),
+    val trailers: List<Trailer> = emptyList(),
+    val podroll: List<RemoteItem> = emptyList(),
+    val locked: Boolean = false,
+    val podcastGuid: String? = null,
+    val live: Boolean = false,
+    val season: Int? = null,
+    val episodeNumber: String? = null,
 )
 
 @HiltViewModel
@@ -117,21 +136,44 @@ class PlayerViewModel @Inject constructor(
     fun sleepAtEnd() = player.sleepAtEnd()
     fun moreIntro() = player.moreIntro()
     fun moreOutro() = player.moreOutro()
+    fun subscribe(url: String) {
+        viewModelScope.launch { runCatching { feeds.subscribe(url, markNeedsSync = true) } }
+    }
+    fun useEnclosure(url: String) {
+        val key = playback.value.episodeKey ?: return
+        viewModelScope.launch {
+            feeds.useEnclosure(key, url)
+            player.play(key)
+        }
+    }
 
     private fun load(episodeKey: String) {
         viewModelScope.launch {
             val episode = feeds.getEpisode(episodeKey) ?: return@launch
             val extra = episode.extras()
             val podcast = feeds.getPodcast(episode.podcastId)
+            val show = podcast?.extras()
             _details.value = EpisodeDetails(
                 description = episode.description,
                 chapters = episode.chapters(),
                 transcripts = episode.transcripts(),
-                persons = episode.persons(),
+                persons = episode.persons().ifEmpty { podcast?.persons().orEmpty() },
                 html = extra.descriptionHtml,
                 soundbites = extra.soundbites,
-                value = extra.value + (podcast?.valueRecipients() ?: emptyList()),
+                value = extra.value.ifEmpty { podcast?.valueRecipients().orEmpty() },
+                valueSuggested = extra.valueSuggested ?: show?.valueSuggested,
                 funding = podcast?.funding() ?: emptyList(),
+                alternates = extra.alternates,
+                location = extra.location ?: show?.location,
+                license = extra.license ?: show?.license,
+                txt = extra.txt.ifEmpty { show?.txt.orEmpty() },
+                trailers = show?.trailers.orEmpty(),
+                podroll = show?.podroll.orEmpty(),
+                locked = podcast?.locked == true,
+                podcastGuid = podcast?.podcastGuid,
+                live = extra.live,
+                season = extra.season,
+                episodeNumber = extra.episodeNumber,
             )
             val remote = feeds.ensureChapters(episodeKey)
             if (remote.isNotEmpty()) _details.value = _details.value.copy(chapters = remote)
@@ -190,6 +232,11 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                     if (playback.artist.isNotBlank()) {
                         Text(playback.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    val currentChapter = details.chapters.lastOrNull { playback.positionMs >= it.startMs }
+                    if (currentChapter != null) {
+                        Text(currentChapter.title, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                    }
+                    FeatureRow(details)
                     if (details.persons.isNotEmpty()) {
                         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             details.persons.take(6).forEach { person ->
@@ -247,81 +294,13 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                     playback.error?.let { message ->
                         Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                     }
-                    if (details.chapters.isNotEmpty()) {
-                        Text("Kapitel", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
-                        details.chapters.forEach { chapter ->
-                            val later = details.chapters.any { it.startMs > chapter.startMs && playback.positionMs >= it.startMs }
-                            val current = playback.positionMs >= chapter.startMs && !later
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { viewModel.seekTo(chapter.startMs) }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (!chapter.imageUrl.isNullOrBlank()) {
-                                    Artwork(chapter.imageUrl, chapter.title, Modifier.size(40.dp))
-                                    Spacer(Modifier.size(8.dp))
-                                }
-                                Text(
-                                    "${formatClock(chapter.startMs)}  ${chapter.title}",
-                                    color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (!chapter.url.isNullOrBlank()) {
-                                    TextButton(onClick = {
-                                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(chapter.url))) }
-                                    }) { Text("Link") }
-                                }
-                            }
-                        }
-                    }
-                    if (details.cues.isNotEmpty()) {
-                        Text("Transkript", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
-                        details.cues.take(400).forEach { cue ->
-                            val active = playback.positionMs in cue.startMs until cue.endMs
-                            Text(
-                                cue.text,
-                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { viewModel.seekTo(cue.startMs) }
-                                    .padding(vertical = 4.dp),
-                            )
-                        }
-                    }
-                    details.soundbites.forEach { bite ->
-                        TextButton(onClick = { viewModel.seekTo(bite.startMs) }) {
-                            Text("Soundbite ${formatClock(bite.startMs)} ${bite.title}")
-                        }
-                    }
-                    details.funding.forEach { link ->
-                        TextButton(onClick = {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link.url))) }
-                        }) { Text(link.title) }
-                    }
-                    if (details.value.isNotEmpty()) {
-                        Text("Value 4 Value", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-                        details.value.forEach { recipient ->
-                            Text(
-                                listOfNotNull(recipient.name, recipient.type, recipient.address, recipient.split?.let { "$it%" }).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                    if (details.html.contains('<')) {
-                        HtmlNotes(details.html)
-                    } else if (details.description.isNotBlank()) {
-                        Text(details.description, modifier = Modifier.padding(top = 12.dp, bottom = 32.dp))
-                    }
-                    details.transcripts.forEach { transcript ->
-                        TextButton(onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(transcript.url))
-                            runCatching { context.startActivity(intent) }
-                        }) {
-                            Text("Transkript öffnen" + (transcript.language?.let { " ($it)" } ?: ""))
-                        }
-                    }
+                    EpisodeDossier(
+                        details = details,
+                        positionMs = playback.positionMs,
+                        onSeek = viewModel::seekTo,
+                        onSubscribe = viewModel::subscribe,
+                        onUseEnclosure = viewModel::useEnclosure,
+                    )
                 }
             }
         }

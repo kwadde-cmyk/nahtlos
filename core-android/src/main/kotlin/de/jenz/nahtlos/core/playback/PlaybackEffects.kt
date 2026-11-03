@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.core.playback
 
 import android.media.audiofx.LoudnessEnhancer
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -26,6 +27,7 @@ class PlaybackEffects(
 ) {
     private var boost: LoudnessEnhancer? = null
     private var outroArmedFor: String? = null
+    private var shownChapter: String? = null
 
     fun applyForCurrentItem() {
         val key = player.currentMediaItem?.mediaId ?: return
@@ -90,8 +92,20 @@ class PlaybackEffects(
             val title = feeds.ensureChapters(key).firstOrNull { it.startMs == target }?.title
             withContext(Dispatchers.Main) {
                 player.seekTo(target)
-                if (!title.isNullOrBlank()) showChapter(title)
+                if (!title.isNullOrBlank()) showChapter(title, null)
             }
+        }
+    }
+
+    fun tickChapter() {
+        val key = player.currentMediaItem?.mediaId ?: return
+        val position = player.currentPosition
+        scope.launch {
+            val chapter = runCatching { feeds.ensureChapters(key) }.getOrDefault(emptyList())
+                .lastOrNull { it.startMs <= position } ?: return@launch
+            if (chapter.title == shownChapter) return@launch
+            shownChapter = chapter.title
+            withContext(Dispatchers.Main) { showChapter(chapter.title, chapter.imageUrl) }
         }
     }
 
@@ -118,10 +132,12 @@ class PlaybackEffects(
         }
     }
 
-    private fun showChapter(title: String) {
+    private fun showChapter(title: String, imageUrl: String?) {
         val item = player.currentMediaItem ?: return
+        val metadata = item.mediaMetadata.buildUpon().setSubtitle(title)
+        if (!imageUrl.isNullOrBlank()) metadata.setArtworkUri(Uri.parse(imageUrl))
         val updated = item.buildUpon()
-            .setMediaMetadata(item.mediaMetadata.buildUpon().setSubtitle(title).build())
+            .setMediaMetadata(metadata.build())
             .build()
         val index = player.currentMediaItemIndex
         val position = player.currentPosition

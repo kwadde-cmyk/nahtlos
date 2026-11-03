@@ -28,6 +28,21 @@ class Podcasting20ExtrasTest {
         val live = feed.episodes.single { it.live }
         assertEquals("Live-Runde", live.title)
         assertEquals("https://cdn.example/live.mp3", live.enclosureUrl)
+        assertEquals("live", live.liveStatus)
+    }
+
+    @Test
+    fun readsPodrollTrailerLocationAndPlainTranscript() {
+        val feed = parser.parse(PODROLL)
+        val remote = feed.podroll.single()
+        assertEquals("https://example.com/other.xml", remote.feedUrl)
+        assertEquals("Andere Show", remote.title)
+        assertEquals("Berlin", feed.location?.name)
+        assertEquals("https://example.com/trailer.mp3", feed.trailers.single().url)
+        assertEquals("CC", feed.license?.name)
+        assertEquals("hello", feed.txt.single().value)
+        val text = TranscriptParser.parse("Nur Text", "text/plain")
+        assertEquals("Nur Text", text.single().text)
     }
 
     @Test
@@ -93,6 +108,25 @@ class Podcasting20ExtrasTest {
                   <title>Live-Runde</title>
                   <enclosure url="https://cdn.example/live.mp3" type="audio/mpeg"/>
                 </podcast:liveItem>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val PODROLL = """
+            <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+              <channel>
+                <title>Empfehler</title>
+                <podcast:location geo="52.5,13.4">Berlin</podcast:location>
+                <podcast:license url="https://creativecommons.org/licenses/by/4.0/">CC</podcast:license>
+                <podcast:txt purpose="verify">hello</podcast:txt>
+                <podcast:trailer url="https://example.com/trailer.mp3" season="1">Vorspann</podcast:trailer>
+                <podcast:podroll>
+                  <podcast:remoteItem feedGuid="guid-1" feedUrl="https://example.com/other.xml" title="Andere Show"/>
+                </podcast:podroll>
+                <item>
+                  <title>Eins</title>
+                  <enclosure url="https://cdn.example/a.mp3" type="audio/mpeg"/>
+                </item>
               </channel>
             </rss>
         """.trimIndent()

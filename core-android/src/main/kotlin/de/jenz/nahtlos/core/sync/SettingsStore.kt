@@ -31,6 +31,8 @@ data class ServerSettings(
     val volumeBoost: Boolean = false,
     val swipeStart: SwipeAction = SwipeAction.START_DEFAULT,
     val swipeEnd: SwipeAction = SwipeAction.END_DEFAULT,
+    val podcastIndexKey: String = "",
+    val podcastIndexSecret: String = "",
 ) {
     val configured: Boolean
         get() = (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) && token.isNotBlank()
@@ -70,6 +72,8 @@ class SettingsStore @Inject constructor(
             } else {
                 SwipeAction.fromId(prefs.getString(KEY_SWIPE_END, null))
             },
+            podcastIndexKey = prefs.getString(KEY_INDEX_KEY, "").orEmpty(),
+            podcastIndexSecret = prefs.getString(KEY_INDEX_SECRET, "").orEmpty(),
         )
     }
 
@@ -88,6 +92,8 @@ class SettingsStore @Inject constructor(
         volumeBoost: Boolean = read().volumeBoost,
         swipeStart: SwipeAction = read().swipeStart,
         swipeEnd: SwipeAction = read().swipeEnd,
+        podcastIndexKey: String? = null,
+        podcastIndexSecret: String? = null,
     ) {
         val normalized = serverUrl.trim().trimEnd('/').let { url ->
             if (url.isEmpty()) "" else EpisodeKeys.normalizeFeedUrl(url)
@@ -107,6 +113,8 @@ class SettingsStore @Inject constructor(
             .putBoolean(KEY_BOOST, volumeBoost)
             .putString(KEY_SWIPE_START, swipeStart.id)
             .putString(KEY_SWIPE_END, swipeEnd.id)
+            .putString(KEY_INDEX_KEY, podcastIndexKey ?: read().podcastIndexKey)
+            .putString(KEY_INDEX_SECRET, podcastIndexSecret ?: read().podcastIndexSecret)
             .apply()
     }
 
@@ -155,6 +163,8 @@ class SettingsStore @Inject constructor(
         private const val KEY_BOOST = "volumeBoost"
         private const val KEY_SWIPE_START = "swipeStart"
         private const val KEY_SWIPE_END = "swipeEnd"
+        private const val KEY_INDEX_KEY = "podcastIndexKey"
+        private const val KEY_INDEX_SECRET = "podcastIndexSecret"
         private const val KEY_GESTURE_HINT = "gesturesHintSeen"
     }
 }

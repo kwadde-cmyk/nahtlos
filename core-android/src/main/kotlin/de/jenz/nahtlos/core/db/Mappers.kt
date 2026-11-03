@@ -1,12 +1,18 @@
 package de.jenz.nahtlos.core.db
 
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.model.AlternateSource
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.EpisodeProgress
 import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
 import de.jenz.nahtlos.model.Person
+import de.jenz.nahtlos.model.PodLicense
+import de.jenz.nahtlos.model.PodLocation
+import de.jenz.nahtlos.model.PodTxt
+import de.jenz.nahtlos.model.RemoteItem
+import de.jenz.nahtlos.model.Trailer
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.model.Soundbite
 import de.jenz.nahtlos.model.Subscription
@@ -41,6 +47,17 @@ fun ParsedFeed.toPodcast(
         fundingJson = json.encodeToString(funding),
         valueJson = json.encodeToString(value),
         locked = locked,
+        extrasJson = json.encodeToString(
+            PodcastExtras(
+                location = location,
+                license = license,
+                txt = txt,
+                trailers = trailers,
+                podroll = podroll,
+                valueMethod = valueMethod,
+                valueSuggested = valueSuggested,
+            ),
+        ),
     )
 }
 
@@ -50,8 +67,26 @@ data class EpisodeExtras(
     val season: Int? = null,
     val episodeNumber: String? = null,
     val live: Boolean = false,
+    val liveStatus: String? = null,
     val soundbites: List<Soundbite> = emptyList(),
     val value: List<ValueRecipient> = emptyList(),
+    val valueMethod: String? = null,
+    val valueSuggested: String? = null,
+    val alternates: List<AlternateSource> = emptyList(),
+    val location: PodLocation? = null,
+    val license: PodLicense? = null,
+    val txt: List<PodTxt> = emptyList(),
+)
+
+@Serializable
+data class PodcastExtras(
+    val location: PodLocation? = null,
+    val license: PodLicense? = null,
+    val txt: List<PodTxt> = emptyList(),
+    val trailers: List<Trailer> = emptyList(),
+    val podroll: List<RemoteItem> = emptyList(),
+    val valueMethod: String? = null,
+    val valueSuggested: String? = null,
 )
 
 @Serializable
@@ -84,8 +119,15 @@ fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntit
             season = season,
             episodeNumber = episodeNumber,
             live = live,
+            liveStatus = liveStatus,
             soundbites = soundbites,
             value = value,
+            valueMethod = valueMethod,
+            valueSuggested = valueSuggested,
+            alternates = alternates,
+            location = location,
+            license = license,
+            txt = txt,
         ),
     ),
 )
@@ -103,6 +145,9 @@ fun EpisodeEntity.extras(): EpisodeExtras = try {
     android.util.Log.w("Nahtlos", "EpisodeExtras für $episodeKey nicht lesbar", error)
     EpisodeExtras()
 }
+
+fun PodcastEntity.extras(): PodcastExtras =
+    runCatching { json.decodeFromString<PodcastExtras>(extrasJson) }.getOrDefault(PodcastExtras())
 
 fun PodcastEntity.funding(): List<FundingLink> =
     runCatching { json.decodeFromString<List<FundingLink>>(fundingJson) }.getOrDefault(emptyList())

@@ -119,6 +119,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             while (isActive) {
                 delay(2_000)
                 fx.tickOutro()
+                fx.tickChapter()
             }
         }
         val syncer = PlaybackSync(exo, sync, scope) { episodeKey ->

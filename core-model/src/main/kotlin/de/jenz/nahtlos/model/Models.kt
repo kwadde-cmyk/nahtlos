@@ -139,6 +139,30 @@ data class ValueRecipient(
 data class Soundbite(val startMs: Long, val durationMs: Long? = null, val title: String = "")
 
 @Serializable
+data class RemoteItem(
+    val feedGuid: String? = null,
+    val feedUrl: String? = null,
+    val itemGuid: String? = null,
+    val title: String? = null,
+    val medium: String? = null,
+)
+
+@Serializable
+data class AlternateSource(val url: String, val type: String? = null, val bitrate: Int = 0)
+
+@Serializable
+data class Trailer(val url: String, val title: String = "", val season: String? = null)
+
+@Serializable
+data class PodLocation(val name: String = "", val geo: String? = null, val osm: String? = null)
+
+@Serializable
+data class PodLicense(val url: String = "", val name: String = "")
+
+@Serializable
+data class PodTxt(val purpose: String? = null, val value: String = "")
+
+@Serializable
 data class TranscriptCue(val startMs: Long, val endMs: Long, val text: String)
 
 data class ParsedEpisode(
@@ -159,8 +183,15 @@ data class ParsedEpisode(
     val season: Int? = null,
     val episodeNumber: String? = null,
     val live: Boolean = false,
+    val liveStatus: String? = null,
     val soundbites: List<Soundbite> = emptyList(),
     val value: List<ValueRecipient> = emptyList(),
+    val valueMethod: String? = null,
+    val valueSuggested: String? = null,
+    val alternates: List<AlternateSource> = emptyList(),
+    val location: PodLocation? = null,
+    val license: PodLicense? = null,
+    val txt: List<PodTxt> = emptyList(),
 )
 
 data class ParsedFeed(
@@ -175,6 +206,13 @@ data class ParsedFeed(
     val funding: List<FundingLink> = emptyList(),
     val locked: Boolean = false,
     val value: List<ValueRecipient> = emptyList(),
+    val valueMethod: String? = null,
+    val valueSuggested: String? = null,
+    val location: PodLocation? = null,
+    val license: PodLicense? = null,
+    val txt: List<PodTxt> = emptyList(),
+    val trailers: List<Trailer> = emptyList(),
+    val podroll: List<RemoteItem> = emptyList(),
 )
 
 class FeedParseException(message: String, cause: Throwable? = null) : Exception(message, cause)
