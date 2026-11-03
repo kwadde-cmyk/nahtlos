@@ -11,4 +11,5 @@ object SessionActions {
     const val BOOST = "nahtlos.volume_boost"
     const val INTRO = "nahtlos.intro"
     const val OUTRO = "nahtlos.outro"
+    const val QUICK_BOOST = "nahtlos.quick_boost"
 }

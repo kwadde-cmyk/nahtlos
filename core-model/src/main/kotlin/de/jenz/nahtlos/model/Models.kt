@@ -133,6 +133,22 @@ data class ValueRecipient(
     val type: String? = null,
     val address: String? = null,
     val split: Int? = null,
+    val fee: Boolean = false,
+    val customKey: Long? = null,
+    val customValue: String? = null,
+)
+
+/**
+ * Zeitfenster, in dem andere Empfänger gelten.
+ * [remotePercentage] ist der Anteil am Boost, der an [recipients] geht.
+ * Der Rest bleibt beim normalen Value-Block der Folge oder des Kanals.
+ */
+@Serializable
+data class ValueTimeSplit(
+    val startMs: Long,
+    val durationMs: Long,
+    val remotePercentage: Int = 100,
+    val recipients: List<ValueRecipient> = emptyList(),
 )
 
 @Serializable
@@ -188,6 +204,7 @@ data class ParsedEpisode(
     val value: List<ValueRecipient> = emptyList(),
     val valueMethod: String? = null,
     val valueSuggested: String? = null,
+    val valueTimeSplits: List<ValueTimeSplit> = emptyList(),
     val alternates: List<AlternateSource> = emptyList(),
     val location: PodLocation? = null,
     val license: PodLicense? = null,

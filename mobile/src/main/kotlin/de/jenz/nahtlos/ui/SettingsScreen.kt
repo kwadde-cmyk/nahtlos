@@ -56,6 +56,7 @@ import de.jenz.nahtlos.playback.PlaybackTuning
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -136,6 +137,8 @@ fun SettingsScreen(
                 "Phone und Auto teilen sich die Wiedergabeposition. Beim Pausieren wird sie hochgeladen, beim Start im Auto geholt. Der neuere Zeitstempel gewinnt — beide Uhren sollten stimmen.",
                 style = MaterialTheme.typography.bodyLarge,
             )
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            WalletSection(onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } })
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = url,

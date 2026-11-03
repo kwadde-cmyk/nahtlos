@@ -62,6 +62,7 @@ fun EpisodeDossier(
     onSeek: (Long) -> Unit,
     onSubscribe: (String) -> Unit,
     onUseEnclosure: (String) -> Unit,
+    onBoost: () -> Unit = {},
 ) {
     var tab by remember(details.podcastGuid, details.chapters.size, details.cues.size) {
         mutableStateOf(
@@ -89,7 +90,7 @@ fun EpisodeDossier(
         DossierTab.Chapters -> ChaptersTab(details, positionMs, onSeek)
         DossierTab.Transcript -> TranscriptTab(details, positionMs, onSeek)
         DossierTab.People -> PeopleTab(details)
-        DossierTab.Support -> SupportTab(details, onSubscribe)
+        DossierTab.Support -> SupportTab(details, onSubscribe, onBoost)
     }
     if (details.alternates.size > 1) {
         Text("Qualität", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
@@ -216,7 +217,7 @@ private fun PeopleTab(details: EpisodeDetails) {
 }
 
 @Composable
-private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit) {
+private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit, onBoost: () -> Unit) {
     val context = LocalContext.current
     if (details.funding.isEmpty() && details.value.isEmpty() && details.podroll.isEmpty()) {
         Text("Keine Funding- oder Value-Angaben.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
@@ -229,12 +230,20 @@ private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit) {
     }
     if (details.value.isNotEmpty()) {
         Text("Value4Value", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
-        details.valueSuggested?.let { Text("Vorschlag: $it sat (nur Anzeige)") }
+        details.valueSuggested?.let { Text("Vorschlag aus dem Feed: $it") }
         Text(
-            "Empfänger und Splits. Keine Zahlung: ein Wallet wie Alby oder NWC ist nicht angebunden.",
+            "Empfänger und Splits. Ein Boost geht über Alby Hub (NWC), Streaming-Sats kommen später.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
         )
+        Button(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
+        if (details.timeSplits.isNotEmpty()) {
+            Text(
+                "Zeitfenster ändern die Empfänger an der aktuellen Stelle.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         details.value.forEach { recipient ->
             Text(
                 listOfNotNull(recipient.name, recipient.type, recipient.address, recipient.split?.let { "$it %" }).joinToString(" · "),

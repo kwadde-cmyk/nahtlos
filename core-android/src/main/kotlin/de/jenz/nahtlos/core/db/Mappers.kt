@@ -19,6 +19,7 @@ import de.jenz.nahtlos.model.Subscription
 import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.model.TranscriptLink
 import de.jenz.nahtlos.model.ValueRecipient
+import de.jenz.nahtlos.model.ValueTimeSplit
 import de.jenz.nahtlos.model.NahtlosJson
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -72,6 +73,7 @@ data class EpisodeExtras(
     val value: List<ValueRecipient> = emptyList(),
     val valueMethod: String? = null,
     val valueSuggested: String? = null,
+    val valueTimeSplits: List<ValueTimeSplit> = emptyList(),
     val alternates: List<AlternateSource> = emptyList(),
     val location: PodLocation? = null,
     val license: PodLicense? = null,
@@ -124,6 +126,7 @@ fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntit
             value = value,
             valueMethod = valueMethod,
             valueSuggested = valueSuggested,
+            valueTimeSplits = valueTimeSplits,
             alternates = alternates,
             location = location,
             license = license,

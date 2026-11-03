@@ -47,6 +47,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
+import de.jenz.nahtlos.core.wallet.WalletViewModel
+import de.jenz.nahtlos.core.wallet.formatSats
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +77,8 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val walletModel: WalletViewModel = hiltViewModel()
+    val wallet by walletModel.state.collectAsStateWithLifecycle()
     var url by remember(state.serverUrl) {
         mutableStateOf(state.serverUrl.ifBlank { BuildConfig.NAHTLOS_DEFAULT_SERVER })
     }
@@ -84,6 +88,10 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     var limit by remember(state.downloadLimitMb) { mutableStateOf(state.downloadLimitMb.toString()) }
     var deleteHours by remember(state.deletePlayedAfterHours) { mutableStateOf(state.deletePlayedAfterHours.toString()) }
     var horizon by remember(state.episodeHorizonId) { mutableStateOf(state.episodeHorizonId) }
+    var nwc by remember { mutableStateOf("") }
+    var sender by remember(wallet.senderName) { mutableStateOf(wallet.senderName) }
+    var defaultSats by remember(wallet.defaultSats) { mutableStateOf(wallet.defaultSats.toString()) }
+    var budget by remember(wallet.dailyBudget) { mutableStateOf(wallet.dailyBudget.toString()) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
@@ -93,6 +101,9 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { snackbar.showSnackbar(it) }
+    }
+    LaunchedEffect(walletModel) {
+        walletModel.notice.collectLatest { snackbar.showSnackbar(it) }
     }
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -140,6 +151,70 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(20.dp))
+            Text("Wallet & Zahlungen", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Eigener NWC-Link von Alby Hub, nur auf diesem Auto und verschlüsselt. Er geht nicht über den Server. Im Media-Center gibt es einen Boost-Knopf mit dem Standardbetrag, ohne Eingabe. Einen QR-Scanner gibt es hier nicht.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            wallet.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
+            if (wallet.connected) {
+                Text(
+                    listOf(wallet.alias.ifBlank { "Wallet" }, wallet.balanceLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text("Heute ${wallet.spentToday} von ${wallet.dailyBudget} sats.")
+                OutlinedButton(
+                    onClick = { walletModel.disconnect() },
+                    modifier = Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp),
+                ) { Text("Wallet trennen") }
+            } else {
+                OutlinedTextField(
+                    value = nwc,
+                    onValueChange = { nwc = it.trim() },
+                    label = { Text("NWC-Link") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                Button(
+                    onClick = { walletModel.connect(nwc) },
+                    enabled = !wallet.busy && nwc.startsWith("nostr+walletconnect://"),
+                    modifier = Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp),
+                ) { Text(if (wallet.busy) "Verbinde …" else "Wallet verbinden") }
+            }
+            OutlinedTextField(
+                value = sender,
+                onValueChange = { sender = it.take(40) },
+                label = { Text("Absendername") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            OutlinedTextField(
+                value = defaultSats,
+                onValueChange = { defaultSats = it.filter { char -> char.isDigit() }.take(7) },
+                label = { Text("Schnell-Boost in Sats") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = budget,
+                onValueChange = { budget = it.filter { char -> char.isDigit() }.take(8) },
+                label = { Text("Tagesbudget in Sats") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(
+                onClick = { walletModel.saveLimits(sender, defaultSats.toLongOrNull() ?: 210, budget.toLongOrNull() ?: 5000) },
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+            ) { Text("Beträge speichern") }
+            wallet.history.take(5).forEach { payment ->
+                Text("${payment.totalSats} sats · ${payment.podcast}", modifier = Modifier.padding(top = 8.dp))
+                payment.lines.forEach { line -> Text(line.text, color = if (line.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (payment.routingMsat > 0) Text("Routing ${formatSats(payment.routingMsat)}, extra.")
+                if (payment.canRetry) {
+                    androidx.compose.material3.TextButton(onClick = { walletModel.retry(payment.id) }) { Text("Fehlende erneut") }
+                }
+            }
             Spacer(Modifier.height(16.dp))
             Text("Puffer für Funklöcher: $buffer Minuten", style = MaterialTheme.typography.titleMedium)
             Text(
