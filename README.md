@@ -78,6 +78,8 @@ Podcasting 2.0: Kapitel (JSON, im Player mit Bild und Link, im Auto vor/zurück,
 
 Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Unter Einstellungen lässt er sich lesen, teilen und löschen.
 
+Am Telefon sind die Aktionen beschriftet. Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Entfernen läuft über Wischen oder die Mehrfachauswahl, nicht über ein Papierkorb-Icon. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
+
 ### AAOS
 
 `automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weitermachen, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`.
@@ -238,7 +240,7 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 ## Was diese Version kann
 
 - RSS per URL abonnieren, Folgen listen, streamen, OPML importieren (sofort die Abos, Folgen im Hintergrund) und exportieren
-- Playlist „alles seit Datum“ mit Sortierung, Umsortieren, Entfernen, Sync aufs Auto und Autoplay der nächsten Folge
+- Playlist „alles seit Datum“ mit Sortierung, Ziehen am Griff, Entfernen per Wischen, Sync aufs Auto und Autoplay der nächsten Folge
 - Automatischer Download der Playlist je Gerät (WLAN-Wunsch und Speicherlimit), lokale Datei vor Stream
 - Fertige Downloads nach einer Wartezeit löschen (Standard 24 Stunden) und optional aus der Playlist nehmen
 - Wiedergabe-Cache für etwa 10 Minuten Funkloch, einstellbar, mit Vorladen der aktuellen Folge im Auto

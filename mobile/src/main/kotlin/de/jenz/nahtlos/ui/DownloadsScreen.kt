@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -74,8 +73,14 @@ fun DownloadsScreen(
             TopAppBar(
                 title = { Text(if (selection.active) "${selection.keys.size} ausgewählt" else "Downloads") },
                 navigationIcon = {
-                    IconButton(onClick = { if (selection.active) selection.clear() else onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
+                    LabeledIconButton(
+                        label = if (selection.active) "Auswahl aufheben" else "Zurück",
+                        onClick = { if (selection.active) selection.clear() else onBack() },
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (selection.active) "Auswahl aufheben" else "Zurück",
+                        )
                     }
                 },
                 actions = {
@@ -102,9 +107,18 @@ fun DownloadsScreen(
         },
     ) { padding ->
         if (rows.isEmpty()) {
-            Text("Keine gespeicherten Folgen.", modifier = Modifier.padding(padding).padding(20.dp))
+            Column(Modifier.padding(padding).padding(20.dp)) {
+                Text("Keine gespeicherten Folgen.")
+                Text(
+                    "Folgen aus der Playlist lädt das Handy von selbst. Eine Datei löschst du durch Wischen oder langes Drücken.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                GestureHint(Modifier.padding(top = 8.dp))
+            }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                item { GestureHint() }
                 items(rows, key = { it.episodeKey }) { row ->
                     DownloadLine(row, settings.swipeStart, settings.swipeEnd, selection, onPlay, viewModel::act)
                 }

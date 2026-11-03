@@ -17,7 +17,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -161,7 +160,7 @@ fun PairScreen(onBack: () -> Unit, viewModel: PairViewModel = hiltViewModel()) {
             TopAppBar(
                 title = { Text("Auto koppeln") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    LabeledIconButton(label = "Zurück", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
                     }
                 },

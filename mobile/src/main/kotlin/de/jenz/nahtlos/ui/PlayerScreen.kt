@@ -19,14 +19,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Forward30
+import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -153,7 +152,7 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
             TopAppBar(
                 title = { Text("Player") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    LabeledIconButton(label = "Zurück", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
                     }
                 },
@@ -223,10 +222,12 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = viewModel::seekBack) {
-                            Text("Zurück", style = MaterialTheme.typography.labelLarge)
-                        }
-                        FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp).padding(horizontal = 12.dp)) {
+                        IconTextButton(label = "Zurück", icon = Icons.Filled.Replay, onClick = viewModel::seekBack)
+                        LabeledFilledIconButton(
+                            label = if (playback.isPlaying) "Pause" else "Wiedergabe",
+                            onClick = viewModel::toggle,
+                            modifier = Modifier.size(72.dp).padding(horizontal = 12.dp),
+                        ) {
                             if (playback.buffering) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(28.dp),
@@ -240,9 +241,7 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                                 )
                             }
                         }
-                        IconButton(onClick = viewModel::seekForward) {
-                            Text("Vor", style = MaterialTheme.typography.labelLarge)
-                        }
+                        IconTextButton(label = "Vor", icon = Icons.AutoMirrored.Filled.Forward, onClick = viewModel::seekForward)
                     }
                     playback.error?.let { message ->
                         Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))

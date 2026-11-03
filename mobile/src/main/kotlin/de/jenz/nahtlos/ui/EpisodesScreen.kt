@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -147,7 +146,7 @@ fun EpisodesScreen(
             TopAppBar(
                 title = { Text(podcast?.title ?: "Folgen", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    LabeledIconButton(label = "Zurück", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
                     }
                 },
@@ -156,7 +155,7 @@ fun EpisodesScreen(
                         TextButton(onClick = { selection.all(episodes.map { it.episode.episodeKey }) }) { Text("Alle") }
                         TextButton(onClick = { selection.clear() }) { Text("Fertig") }
                     } else {
-                        IconButton(onClick = { viewModel.refresh(force = true) }) {
+                        LabeledIconButton(label = "Feed aktualisieren", onClick = { viewModel.refresh(force = true) }) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Feed aktualisieren")
                         }
                     }
@@ -250,6 +249,7 @@ private fun EpisodeList(
     ) {
         item {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                GestureHint(Modifier)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Artwork(podcast.imageUrl, podcast.title, Modifier.size(72.dp))
                     Column(Modifier.padding(start = 14.dp)) {
@@ -284,7 +284,7 @@ private fun EpisodeList(
                 val message = when (podcast.refreshStatus) {
                     FeedRefresh.PENDING, FeedRefresh.LOADING -> "Folgen werden geladen."
                     FeedRefresh.FAILED -> podcast.refreshError ?: "Der Feed konnte nicht geladen werden."
-                    else -> "Dieser Feed hat noch keine Folgen mit Audio."
+                    else -> "Dieser Feed hat noch keine Folgen mit Audio. Sobald welche da sind: Wischen legt sie in die Playlist oder markiert sie, langes Drücken wählt mehrere."
                 }
                 Text(message, modifier = Modifier.padding(20.dp))
             }
