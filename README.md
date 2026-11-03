@@ -45,7 +45,7 @@ Offline: die Position landet in einer Room-Outbox. Liegt das Netz wieder an und 
 
 ### Wiedergabe-Cache
 
-Es gibt keine Folgen-Downloads. Stattdessen puffert Media3 über `CacheDataSource` und `SimpleCache` (LRU im App-Cache). Der Load-Controller liest voraus, bis das eingestellte Fenster voll ist, standardmäßig 10 Minuten, einstellbar von 2 bis 30. Die Wiedergabe startet nach etwa einer Sekunde, nicht erst nach dem ganzen Fenster. Ein Rücksprung von 15 oder 30 Sekunden bleibt aus dem Cache bedient, solange die Stelle schon geladen wurde.
+Es gibt einen Wiedergabe-Cache und lokale Playlist-Downloads. Media3 liest über `DefaultDataSource` (file, content und http) und dahinter `CacheDataSource` plus `SimpleCache` (LRU im App-Cache). Eine heruntergeladene Folge startet als `file://`; schlägt die Datei fehl, springt der Player einmal auf die Stream-URL. Der Load-Controller liest voraus, bis das eingestellte Fenster voll ist, standardmäßig 10 Minuten, einstellbar von 2 bis 30. Die Wiedergabe startet nach etwa einer Sekunde, nicht erst nach dem ganzen Fenster. Ein Rücksprung von 15 oder 30 Sekunden bleibt aus dem Cache bedient, solange die Stelle schon geladen wurde.
 
 Die Größe rechnet `PlaybackCachePolicy` mit 320 kbit/s: der RAM-Deckel liegt etwas über diesem Fenster (höchstens 64 MB), der Disk-Cache fasst drei solcher Fenster (mindestens 64 MB, höchstens 512 MB). Leisere Feeds passen zeitlich vollständig hinein. Deutlich höhere Bitraten können den Byte-Deckel vor der vollen Minutenzahl erreichen.
 

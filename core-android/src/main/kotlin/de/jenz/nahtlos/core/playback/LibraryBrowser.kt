@@ -102,10 +102,15 @@ class LibraryBrowser @Inject constructor(
         }
     }
 
-    private fun localOrRemote(episodeKey: String, remote: String): Uri {
-        val local = downloads.existingFile(episodeKey)
-        return if (local != null) Uri.fromFile(local) else Uri.parse(remote)
+    suspend fun streamUri(mediaId: String): Uri? {
+        val remote = db.episodes().get(mediaId)?.enclosureUrl
+            ?: playlists.current().entry(mediaId)?.enclosureUrl
+        if (remote.isNullOrBlank()) return null
+        return Uri.parse(remote)
     }
+
+    private fun localOrRemote(episodeKey: String, remote: String): Uri =
+        playbackUri(downloads.existingFile(episodeKey), remote)
 
     private suspend fun continueItems(): List<MediaItem> {
         val items = continueRows()

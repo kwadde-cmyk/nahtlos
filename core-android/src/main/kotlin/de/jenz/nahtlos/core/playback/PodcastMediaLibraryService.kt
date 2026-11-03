@@ -59,11 +59,15 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     private var librarySession: MediaLibrarySession? = null
     private var playbackSync: PlaybackSync? = null
     private var effects: PlaybackEffects? = null
+    private val fallingBack = mutableSetOf<String>()
 
     override fun onCreate() {
         super.onCreate()
         val exo = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(playbackCache.dataSourceFactory()))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(playbackCache.dataSourceFactory())
+                    .setLoadErrorHandlingPolicy(PlaybackLoadPolicy()),
+            )
             .setLoadControl(ConfigurableLoadControl { settings.read().bufferAheadMinutes })
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -87,6 +91,28 @@ class PodcastMediaLibraryService : MediaLibraryService() {
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 AppLog.record("Player", error.message ?: "Wiedergabe fehlgeschlagen", error)
+                val current = player ?: return
+                val item = current.currentMediaItem ?: return
+                val uri = item.localConfiguration?.uri
+                val scheme = uri?.scheme?.lowercase()
+                if (scheme != "file" && scheme != "content") return
+                if (!fallingBack.add(item.mediaId)) return
+                val position = current.currentPosition.coerceAtLeast(0L)
+                scope.launch {
+                    val remote = runCatching { browser.streamUri(item.mediaId) }.getOrNull()
+                    withContext(Dispatchers.Main) {
+                        val playerNow = player
+                        if (remote == null || playerNow == null || playerNow.currentMediaItem?.mediaId != item.mediaId) {
+                            fallingBack.remove(item.mediaId)
+                            return@withContext
+                        }
+                        AppLog.record("Player", "Lokale Datei für ${item.mediaId} fehlgeschlagen, weiche auf den Stream aus.")
+                        playbackSync?.suppressPushes()
+                        playerNow.setMediaItem(item.buildUpon().setUri(remote).build(), position)
+                        playerNow.prepare()
+                        playerNow.play()
+                    }
+                }.invokeOnCompletion { fallingBack.remove(item.mediaId) }
             }
         })
         scope.launch {
