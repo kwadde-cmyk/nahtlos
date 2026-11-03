@@ -17,6 +17,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.common.Player
 import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ControllerInfo
 import androidx.media3.session.SessionCommand
@@ -123,10 +124,12 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
         }
-        librarySession = MediaLibrarySession.Builder(this, exo, LibraryCallback())
-            .setId("nahtlos")
-            .apply { if (sessionActivity != null) setSessionActivity(sessionActivity) }
-            .build()
+        if (librarySession == null) {
+            librarySession = MediaLibrarySession.Builder(this, exo, LibraryCallback())
+                .setId("nahtlos")
+                .apply { if (sessionActivity != null) setSessionActivity(sessionActivity) }
+                .build()
+        }
         scope.launch(Dispatchers.IO) {
             runCatching { sync.pullAndMerge(force = true) }
             warmContinueListening()
@@ -159,7 +162,13 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    override fun onGetSession(controllerInfo: ControllerInfo): MediaLibrarySession? = librarySession
+    override fun onGetSession(controllerInfo: ControllerInfo): MediaLibrarySession? {
+        val session = librarySession
+        if (session == null) {
+            AppLog.record("Player", "Keine Session für ${controllerInfo.packageName}")
+        }
+        return session
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         playbackSync?.flushBlocking()
@@ -178,42 +187,65 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     }
 
     private fun carButtons(): ImmutableList<CommandButton> = ImmutableList.of(
-        actionButton("Zurück", SessionActions.SKIP_BACK),
-        actionButton("Vor", SessionActions.SKIP_FORWARD),
-        actionButton("Langsamer", SessionActions.SPEED_DOWN),
-        actionButton("Schneller", SessionActions.SPEED_UP),
-        actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV),
-        actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT),
+        actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK),
+        actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD),
+        actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS),
+        actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS),
+        actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS),
+        actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT),
     )
 
-    private fun actionButton(name: String, action: String): CommandButton =
-        CommandButton.Builder()
+    private fun actionButton(name: String, action: String, icon: Int): CommandButton =
+        CommandButton.Builder(icon)
             .setDisplayName(name)
             .setSessionCommand(SessionCommand(action, Bundle.EMPTY))
             .build()
 
+    private fun accepted(session: MediaSession): MediaSession.ConnectionResult {
+        val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+        listOf(
+            SessionActions.SPEED_DOWN,
+            SessionActions.SPEED_UP,
+            SessionActions.SKIP_BACK,
+            SessionActions.SKIP_FORWARD,
+            SessionActions.CHAPTER_PREV,
+            SessionActions.CHAPTER_NEXT,
+            SessionActions.SILENCE,
+            SessionActions.BOOST,
+            SessionActions.INTRO,
+            SessionActions.OUTRO,
+        ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
+        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            .setAvailableSessionCommands(commands.build())
+            .setAvailablePlayerCommands(Player.Commands.Builder().addAllCommands().build())
+            .setCustomLayout(carButtons())
+            .build()
+    }
+
     private inner class LibraryCallback : MediaLibrarySession.Callback {
         override fun onConnect(session: MediaSession, controller: ControllerInfo): MediaSession.ConnectionResult {
-            val base = super.onConnect(session, controller)
-            if (!base.isAccepted) return base
-            val commands = base.availableSessionCommands.buildUpon()
-            listOf(
-                SessionActions.SPEED_DOWN,
-                SessionActions.SPEED_UP,
-                SessionActions.SKIP_BACK,
-                SessionActions.SKIP_FORWARD,
-                SessionActions.CHAPTER_PREV,
-                SessionActions.CHAPTER_NEXT,
-                SessionActions.SILENCE,
-                SessionActions.BOOST,
-                SessionActions.INTRO,
-                SessionActions.OUTRO,
-            ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(commands.build())
-                .setAvailablePlayerCommands(base.availablePlayerCommands)
-                .setCustomLayout(carButtons())
-                .build()
+            val notification = controller.packageName == packageName &&
+                controller.connectionHints.getBoolean(MediaController.KEY_MEDIA_NOTIFICATION_CONTROLLER_FLAG, false)
+            val fallback = runCatching { super.onConnect(session, controller) }.getOrElse { error ->
+                AppLog.record("Player", "Standard-onConnect für ${controller.packageName}: ${error.message}", error)
+                null
+            }
+            val allowed = SessionConnection.accepts(
+                controllerPackage = controller.packageName,
+                ownPackage = packageName,
+                trusted = controller.isTrusted,
+                notificationController = notification,
+                fallbackAccepted = fallback?.isAccepted == true,
+            )
+            if (!allowed) return MediaSession.ConnectionResult.reject()
+            return runCatching { accepted(session) }.getOrElse { error ->
+                AppLog.record(
+                    "Player",
+                    "Verbindung zu ${controller.packageName} ohne eigene Befehle: ${error.message}",
+                    error,
+                )
+                MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+            }
         }
 
         override fun onCustomCommand(
