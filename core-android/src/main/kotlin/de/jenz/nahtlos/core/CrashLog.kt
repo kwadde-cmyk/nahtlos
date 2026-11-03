@@ -18,6 +18,8 @@ object CrashLog {
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             try {
                 write(app, thread, error)
+                AppLog.install(app)
+                AppLog.record("Absturz", error.message ?: error.javaClass.simpleName, error)
             } catch (_: Throwable) {
                 // Never hide the original crash behind a logging failure.
             }

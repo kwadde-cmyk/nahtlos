@@ -2,6 +2,7 @@ package de.jenz.nahtlos.core.sync
 
 import android.util.Log
 import androidx.room.withTransaction
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.SyncPolicy
 import de.jenz.nahtlos.core.db.PendingUnsubEntity
 import de.jenz.nahtlos.core.db.NahtlosDatabase
@@ -103,15 +104,13 @@ class SyncRepository @Inject constructor(
                 pushSubscriptionChanges(current)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = explain(e)
-                Log.w(TAG, "Abo-Sync fehlgeschlagen", e)
+                error = fail("Abo-Sync", e)
             }
             try {
                 reconcileSubscriptions(current)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = explain(e)
-                Log.w(TAG, "Abo-Abruf fehlgeschlagen", e)
+                error = fail("Abo-Abruf", e)
             }
             try {
                 syncProgress(current)
@@ -120,8 +119,7 @@ class SyncRepository @Inject constructor(
                 lastPullAt = System.currentTimeMillis()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = explain(e)
-                Log.w(TAG, "Positions-Sync fehlgeschlagen", e)
+                error = fail("Positions-Sync", e)
             }
             _status.update {
                 it.copy(
@@ -275,12 +273,55 @@ class SyncRepository @Inject constructor(
      * Blocks playback for at most [SyncPolicy.PLAY_GATE_MS], then falls back to the local position.
      * A newer remote document wins; a newer local document is queued instead of being overwritten.
      */
-    suspend fun positionForPlayback(episodeKey: String): Long {
+    suspend fun localPosition(episodeKey: String): Long =
+        db.progress().get(episodeKey)?.positionMs ?: 0L
+
+    /**
+     * Asks the server without blocking playback. Returns a position only when the remote
+     * document is newer than the local one. Cancellation is not swallowed, and the wait
+     * is capped by [SyncPolicy.PLAY_GATE_MS].
+     */
+    suspend fun newerRemotePosition(episodeKey: String): Long? {
         val local = db.progress().get(episodeKey)?.toModel()
         val current = settings.read()
-        if (!current.configured) return local?.positionMs ?: 0L
+        if (!current.configured) return null
         val remote = withTimeoutOrNull(SyncPolicy.PLAY_GATE_MS) {
-            runCatching { api.getProgress(current, episodeKey) }.getOrNull()
+            try {
+                api.getProgress(current, episodeKey)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLog.record("Sync", "Position für $episodeKey nicht geholt: ${error.message}", error)
+                null
+            }
+        } ?: return null
+        if (local == null) {
+            db.progress().upsert(remote.toProgressEntity())
+            _remote.emit(remote)
+            return remote.positionMs
+        }
+        val winner = ProgressResolver.pick(local, remote)
+        if (winner !== remote) return null
+        db.progress().upsert(remote.toProgressEntity())
+        db.outbox().deleteUpTo(episodeKey, remote.updatedAt)
+        _remote.emit(remote)
+        return remote.positionMs
+    }
+
+    suspend fun positionForPlayback(episodeKey: String): Long {
+        val localMs = localPosition(episodeKey)
+        val local = db.progress().get(episodeKey)?.toModel()
+        val current = settings.read()
+        if (!current.configured) return localMs
+        val remote = withTimeoutOrNull(SyncPolicy.PLAY_GATE_MS) {
+            try {
+                api.getProgress(current, episodeKey)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLog.record("Sync", "Position für $episodeKey nicht geholt: ${error.message}", error)
+                null
+            }
         }
         if (remote == null) return local?.positionMs ?: 0L
         if (local == null) {
@@ -304,12 +345,12 @@ class SyncRepository @Inject constructor(
 
     suspend fun onSocketMessage(text: String) {
         val event = runCatching { NahtlosJson.json.decodeFromString<SyncEvent>(text) }.getOrNull() ?: return
-        val progress = event.progress ?: return
-        val remotePlaylist = event.playlist
-        if (event.type == SyncEvent.TYPE_PLAYLIST && remotePlaylist != null) {
+        if (event.type == SyncEvent.TYPE_PLAYLIST) {
+            val remotePlaylist = event.playlist ?: return
             playlists.applyRemote(remotePlaylist)
             return
         }
+        val progress = event.progress ?: return
         if (event.type != SyncEvent.TYPE_PROGRESS) return
         if (progress.deviceId == settings.read().deviceId) return
         applyRemote(progress)
@@ -419,6 +460,13 @@ class SyncRepository @Inject constructor(
 
     private fun scheduleFlush() {
         if (settings.read().configured) outboxWork.schedule()
+    }
+
+    private fun fail(stage: String, error: Throwable): String {
+        val message = explain(error)
+        Log.w(TAG, "$stage fehlgeschlagen", error)
+        AppLog.record("Sync", "$stage: $message", error)
+        return message
     }
 
     private fun explain(error: Throwable): String = when (error) {

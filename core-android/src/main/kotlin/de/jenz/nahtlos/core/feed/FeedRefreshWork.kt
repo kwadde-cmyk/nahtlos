@@ -13,6 +13,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -52,15 +53,20 @@ class FeedRefreshWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val feeds = EntryPointAccessors.fromApplication(
+        val entry = EntryPointAccessors.fromApplication(
             applicationContext,
             FeedRefreshEntryPoint::class.java,
-        ).feedRepository()
+        )
+        val feeds = entry.feedRepository()
+        val playlists = entry.playlistRepository()
         feeds.requeueInterrupted()
         val gate = Semaphore(FeedRefresh.CONCURRENCY)
         while (true) {
             val batch = feeds.pendingRefresh()
-            if (batch.isEmpty()) return Result.success()
+            if (batch.isEmpty()) {
+                runCatching { playlists.refresh() }
+                return Result.success()
+            }
             coroutineScope {
                 batch.map { podcast ->
                     async {
@@ -84,4 +90,5 @@ class FeedRefreshWorker(
 @InstallIn(SingletonComponent::class)
 interface FeedRefreshEntryPoint {
     fun feedRepository(): FeedRepository
+    fun playlistRepository(): PlaylistRepository
 }

@@ -72,6 +72,45 @@ object PlaylistResolver {
         }
         return existing
     }
+
+    /** A missing server document: no timestamp, no device, no items, no date. */
+    fun isPlaceholder(playlist: ListeningPlaylist): Boolean =
+        playlist.updatedAt <= 0L &&
+            playlist.deviceId.isBlank() &&
+            playlist.items.isEmpty() &&
+            playlist.sinceEpochMs == 0L &&
+            playlist.excludedKeys.isEmpty()
+
+    /**
+     * A newer remote document that really cleared the queue: it names a device and
+     * lists the removed keys. An empty body from a server that has no items yet,
+     * or from a generate before the feeds arrived, is not a clear.
+     */
+    fun genuineClear(local: ListeningPlaylist, remote: ListeningPlaylist): Boolean =
+        local.items.isNotEmpty() &&
+            remote.items.isEmpty() &&
+            remote.updatedAt > local.updatedAt &&
+            remote.deviceId.isNotBlank() &&
+            remote.excludedKeys.isNotEmpty()
+
+    /**
+     * [remote] null means the server has no playlist route or the body was not a playlist.
+     * An empty remote document never replaces local items unless [genuineClear].
+     */
+    fun merge(local: ListeningPlaylist, remote: ListeningPlaylist?): ListeningPlaylist {
+        if (remote == null || isPlaceholder(remote)) return local
+        if (local.items.isNotEmpty() && remote.items.isEmpty() && !genuineClear(local, remote)) return local
+        if (local.updatedAt <= 0L && local.items.isEmpty() && local.deviceId.isBlank()) return remote
+        return pick(local, remote)
+    }
+
+    /** What to keep after PUT. A rejected or empty server copy must not wipe local items. */
+    fun afterPush(local: ListeningPlaylist, accepted: Boolean, stored: ListeningPlaylist?): ListeningPlaylist {
+        if (stored == null) return local
+        if (!accepted) return merge(local, stored)
+        if (stored.items.isEmpty() && local.items.isNotEmpty() && !genuineClear(local, stored)) return local
+        return stored
+    }
 }
 
 object PlaylistEditor {
@@ -102,8 +141,23 @@ object PlaylistEditor {
         sort: PlaylistSort,
         excludedKeys: Set<String> = emptySet(),
     ): List<PlaylistEntry> {
+        val knownKeys = candidates.map { it.episodeKey }.toSet()
+        val byEnclosure = candidates
+            .filter { it.enclosureUrl.isNotBlank() }
+            .associateBy { it.enclosureUrl }
+        val normalized = current.map { entry ->
+            val matched = entry.enclosureUrl.takeIf { it.isNotBlank() }?.let { byEnclosure[it] }
+            if (matched != null && matched.episodeKey != entry.episodeKey) matched.toEntry() else entry
+        }.distinctBy { it.episodeKey }
         val generated = generate(candidates, sinceEpochMs, sort, excludedKeys).associateBy { it.episodeKey }
-        val kept = current.filter { it.episodeKey in generated }
+        val kept = normalized.filter { entry ->
+            when {
+                entry.episodeKey in excludedKeys -> false
+                entry.episodeKey in generated -> true
+                entry.episodeKey !in knownKeys && entry.enclosureUrl !in byEnclosure -> true
+                else -> false
+            }
+        }
         val keptKeys = kept.map { it.episodeKey }.toSet()
         val fresh = generated.values
             .filter { it.episodeKey !in keptKeys }

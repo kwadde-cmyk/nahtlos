@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.feed.EpisodeHorizon
@@ -100,8 +101,10 @@ fun SettingsScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
+    var diagnose by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
+        diagnose = withContext(Dispatchers.IO) { AppLog.read(context) }
     }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { message -> snackbar.showSnackbar(message) }
@@ -253,28 +256,44 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth().height(if (wide) 64.dp else 52.dp),
             ) { Text("Auto koppeln") }
             Spacer(Modifier.height(20.dp))
-            Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)
-            if (crash.isNullOrBlank()) {
+            Text("Diagnose", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Sync- und Wiedergabefehler stehen hier, auch ohne Logcat. Ein 404 auf /v1/playlist heißt: der Server auf dem Pi ist älter als die Playlist-Schnittstelle und sollte aktualisiert werden. Der Stand mit Gerätekopplung hat die Schnittstelle schon.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            val report = listOfNotNull(
+                diagnose?.let { "Sync und Wiedergabe\n$it" },
+                crash?.let { "Letzter Absturz\n$it" },
+            ).joinToString("\n\n").ifBlank { null }
+            if (report == null) {
                 Text(
-                    "Keiner protokolliert. Ein Absturz schreibt den Stacktrace in den App-Speicher, auch ohne Logcat.",
+                    "Noch nichts protokolliert.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             } else {
                 SelectionContainer {
-                    Text(crash.orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        report,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
                 Row {
                     TextButton(onClick = {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Absturz")
-                            putExtra(Intent.EXTRA_TEXT, crash)
+                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Diagnose")
+                            putExtra(Intent.EXTRA_TEXT, report)
                         }
-                        context.startActivity(Intent.createChooser(send, "Absturzbericht teilen"))
+                        context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
                     }) { Text("Teilen") }
                     TextButton(onClick = {
+                        AppLog.clear(context)
                         CrashLog.clear(context)
+                        diagnose = null
                         crash = null
                     }) { Text("Löschen") }
                 }

@@ -3,9 +3,12 @@ package de.jenz.nahtlos.core.playlist
 import de.jenz.nahtlos.core.db.EpisodeCandidateRow
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.db.PlaylistDocEntity
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.sync.ServerSettings
 import de.jenz.nahtlos.core.sync.SyncClient
+import de.jenz.nahtlos.core.sync.SyncHttpException
 import de.jenz.nahtlos.core.sync.SettingsStore
+import kotlinx.coroutines.CancellationException
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.playlist.ListeningPlaylist
@@ -137,27 +140,40 @@ class PlaylistRepository @Inject constructor(
     suspend fun pull() {
         val current = settings.read()
         if (!current.configured) return
-        val remote = api.getPlaylist(current)
+        val remote = try {
+            api.getPlaylist(current)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            AppLog.record("Sync", "Playlist-Abruf fehlgeschlagen, lokal behalten: ${error.message}", error)
+            return
+        }
+        if (remote == null) {
+            AppLog.record(
+                "Sync",
+                "Server kennt /v1/playlist nicht (404). Lokale Playlist bleibt. Den Server auf dem Pi aktualisieren.",
+            )
+            return
+        }
         val local = current()
-        if (local.updatedAt == 0L && remote.updatedAt == 0L) return
-        val winner = if (local.updatedAt == 0L) remote else PlaylistResolver.pick(local, remote)
-        val localWins = winner.updatedAt == local.updatedAt && winner.deviceId == local.deviceId && winner.items == local.items
-        if (localWins && local.updatedAt > remote.updatedAt) {
+        val merged = PlaylistResolver.merge(local, remote)
+        if (merged != local) {
+            store(merged, needsSync = false)
+        } else if (local.updatedAt > 0L && (PlaylistResolver.isPlaceholder(remote) || local.updatedAt > remote.updatedAt)) {
             push(current, local)
-        } else if (!localWins) {
-            store(winner, needsSync = false)
         }
         downloads.enqueue()
     }
 
     suspend fun applyRemote(remote: ListeningPlaylist) {
         val local = current()
-        if (local.updatedAt == 0L || PlaylistResolver.pick(local, remote) === remote) {
-            store(remote, needsSync = false)
+        val merged = PlaylistResolver.merge(local, remote)
+        if (merged != local) {
+            store(merged, needsSync = false)
             downloads.enqueue()
-        } else if (local.updatedAt > remote.updatedAt) {
-            val settings = settings.read()
-            if (settings.configured) push(settings, local)
+        } else if (local.updatedAt > remote.updatedAt && local.updatedAt > 0L) {
+            val current = settings.read()
+            if (current.configured) push(current, local)
         }
     }
 
@@ -180,9 +196,25 @@ class PlaylistRepository @Inject constructor(
     }
 
     private suspend fun push(settings: ServerSettings, playlist: ListeningPlaylist) {
-        val response = api.putPlaylist(settings, playlist)
-        store(response.stored, needsSync = !response.accepted)
-        if (!response.accepted) downloads.enqueue()
+        try {
+            val response = api.putPlaylist(settings, playlist)
+            val adopted = PlaylistResolver.afterPush(playlist, response.accepted, response.stored)
+            store(adopted, needsSync = !response.accepted && adopted == playlist)
+            if (!response.accepted) {
+                AppLog.record("Sync", "Server hat die Playlist abgelehnt. Lokal behalten (${playlist.items.size} Folgen).")
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: SyncHttpException) {
+            AppLog.record(
+                "Sync",
+                "Playlist-Upload HTTP ${error.code}: ${error.message}. Lokal behalten. " +
+                    "404 heißt, der Server auf dem Pi ist älter als die Playlist-Schnittstelle.",
+                error,
+            )
+        } catch (error: Exception) {
+            AppLog.record("Sync", "Playlist-Upload fehlgeschlagen, lokal behalten: ${error.message}", error)
+        }
     }
 
     private suspend fun store(playlist: ListeningPlaylist, needsSync: Boolean) {

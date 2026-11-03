@@ -67,6 +67,7 @@ class Net(private val client: OkHttpClient) {
         val request = request(url, method, body, headers)
         return suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)
+            call.timeout().timeout(12, TimeUnit.SECONDS)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {

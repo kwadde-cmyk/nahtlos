@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
@@ -81,6 +82,10 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 fx.applyForCurrentItem()
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                AppLog.record("Player", error.message ?: "Wiedergabe fehlgeschlagen", error)
             }
         })
         scope.launch {
@@ -292,10 +297,27 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             val target = resolved.getOrNull(index)
             val position = if (startPositionMs == C.TIME_UNSET) {
                 target?.mediaId?.let { id ->
-                    if (LibraryIds.isFolder(id)) 0L else sync.positionForPlayback(id)
+                    if (LibraryIds.isFolder(id)) 0L else sync.localPosition(id)
                 } ?: 0L
             } else {
                 startPositionMs
+            }
+            val resumeKey = if (startPositionMs == C.TIME_UNSET) target?.mediaId else null
+            if (!resumeKey.isNullOrBlank() && !LibraryIds.isFolder(resumeKey)) {
+                val uri = target?.localConfiguration?.uri
+                if (uri == null || uri.toString().isBlank()) {
+                    AppLog.record("Player", "Keine Audio-Adresse für $resumeKey")
+                }
+                scope.launch(Dispatchers.IO) {
+                    val newer = runCatching { sync.newerRemotePosition(resumeKey) }.getOrNull() ?: return@launch
+                    withContext(Dispatchers.Main) {
+                        val exo = player ?: return@withContext
+                        if (exo.currentMediaItem?.mediaId != resumeKey) return@withContext
+                        if (kotlin.math.abs(exo.currentPosition - newer) < 1_500) return@withContext
+                        playbackSync?.suppressPushes()
+                        exo.seekTo(newer)
+                    }
+                }
             }
             MediaSession.MediaItemsWithStartPosition(resolved, index, position)
         }
