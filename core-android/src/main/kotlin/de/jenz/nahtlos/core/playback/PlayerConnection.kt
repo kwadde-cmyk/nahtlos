@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.playback.PlaybackTuning
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -60,7 +61,9 @@ class PlayerConnection @Inject constructor(
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            _state.update { it.copy(error = error.message ?: "Wiedergabe fehlgeschlagen") }
+            val message = error.message ?: "Wiedergabe fehlgeschlagen"
+            AppLog.record("Player", message, error)
+            _state.update { it.copy(error = message, buffering = false) }
         }
     }
 
@@ -69,10 +72,21 @@ class PlayerConnection @Inject constructor(
         connecting = true
         val token = SessionToken(context, ComponentName(context, PodcastMediaLibraryService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
+        scope.launch {
+            delay(8_000)
+            if (controller == null) {
+                connecting = false
+                val message = "Player antwortet nicht. Unter Android 13 die Benachrichtigung erlauben und es erneut versuchen."
+                AppLog.record("Player", message)
+                _state.update { it.copy(error = message, buffering = false) }
+            }
+        }
         future.addListener({
             connecting = false
             val connected = runCatching { future.get() }.getOrElse { error ->
-                _state.update { it.copy(error = error.message ?: "Player nicht erreichbar") }
+                val message = error.message ?: "Player nicht erreichbar"
+                AppLog.record("Player", message, error)
+                _state.update { it.copy(error = message, buffering = false) }
                 return@addListener
             }
             controller = connected
@@ -81,26 +95,36 @@ class PlayerConnection @Inject constructor(
             startTicker()
             pendingKey?.let { key ->
                 pendingKey = null
-                play(key)
+                startPlayback(connected, key)
             }
         }, ContextCompat.getMainExecutor(context))
     }
 
     fun play(episodeKey: String) {
+        _state.update { it.copy(episodeKey = episodeKey, error = null, buffering = true) }
         val current = controller
         if (current == null) {
             pendingKey = episodeKey
             connect()
             return
         }
-        _state.update { it.copy(error = null) }
-        if (current.currentMediaItem?.mediaId == episodeKey && current.playbackState != Player.STATE_IDLE) {
+        startPlayback(current, episodeKey)
+    }
+
+    private fun startPlayback(current: MediaController, episodeKey: String) {
+        try {
+            if (current.currentMediaItem?.mediaId == episodeKey && current.playbackState != Player.STATE_IDLE) {
+                current.play()
+                return
+            }
+            current.setMediaItem(MediaItem.Builder().setMediaId(episodeKey).build())
+            current.prepare()
             current.play()
-            return
+        } catch (error: Throwable) {
+            val message = error.message ?: "Wiedergabe konnte nicht starten"
+            AppLog.record("Player", message, error)
+            _state.update { it.copy(episodeKey = episodeKey, error = message, buffering = false) }
         }
-        current.setMediaItem(MediaItem.Builder().setMediaId(episodeKey).build())
-        current.prepare()
-        current.play()
     }
 
     fun toggle() {
@@ -177,18 +201,21 @@ class PlayerConnection @Inject constructor(
             pauseAtEnd = false
             current.pause()
         }
+        val failure = current.playerError?.let { it.message ?: "Wiedergabe fehlgeschlagen" }
         _state.update {
+            val playing = current.isPlaying || current.playbackState == Player.STATE_READY
             it.copy(
                 connected = true,
-                episodeKey = current.currentMediaItem?.mediaId,
-                title = metadata?.title?.toString().orEmpty(),
-                artist = metadata?.artist?.toString().orEmpty(),
-                artworkUri = metadata?.artworkUri?.toString(),
+                episodeKey = current.currentMediaItem?.mediaId ?: it.episodeKey,
+                title = metadata?.title?.toString().orEmpty().ifBlank { it.title },
+                artist = metadata?.artist?.toString().orEmpty().ifBlank { it.artist },
+                artworkUri = metadata?.artworkUri?.toString() ?: it.artworkUri,
                 isPlaying = current.isPlaying,
                 buffering = current.playbackState == Player.STATE_BUFFERING,
                 positionMs = position,
                 durationMs = duration,
                 speed = current.playbackParameters.speed,
+                error = failure ?: if (playing) null else it.error,
             )
         }
     }

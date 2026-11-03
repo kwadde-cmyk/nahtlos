@@ -92,6 +92,23 @@ class PlaylistEditorTest {
     }
 
     @Test
+    fun refreshKeepsItemsWhoseEpisodesAreNotInTheDatabaseYet() {
+        val pending = entry("missing", day * 4).copy(enclosureUrl = "https://cdn.example/missing.mp3")
+        val current = listOf(pending, entry("a", day))
+        val refreshed = PlaylistEditor.refresh(current, episodes, day, PlaylistSort.OLDEST_FIRST)
+        assertEquals(listOf("missing", "a", "c", "b"), refreshed.map { it.episodeKey })
+    }
+
+    @Test
+    fun refreshRewritesAUrlKeyOnceTheGuidIsKnown() {
+        val urlKey = entry("url:old", day * 2).copy(enclosureUrl = "https://cdn.example/c.mp3")
+        val candidates = episodes + candidate("c", day * 2, "Mitte").copy(enclosureUrl = "https://cdn.example/c.mp3")
+        val refreshed = PlaylistEditor.refresh(listOf(urlKey), candidates.distinctBy { it.episodeKey + it.enclosureUrl }, day, PlaylistSort.OLDEST_FIRST)
+        assertEquals("c", refreshed.first().episodeKey)
+        assertFalse(refreshed.any { it.episodeKey == "url:old" })
+    }
+
+    @Test
     fun newerPlaylistDocumentWinsAndEqualTimestampKeepsTheStoredOne() {
         val stored = ListeningPlaylist(updatedAt = 50, deviceId = "phone", items = listOf(entry("a", day)))
         val newer = stored.copy(updatedAt = 80, deviceId = "car", items = listOf(entry("b", day * 2)))
@@ -99,6 +116,36 @@ class PlaylistEditorTest {
         assertEquals(newer, PlaylistResolver.pick(stored, newer))
         assertEquals(stored, PlaylistResolver.pick(stored, older))
         assertEquals(stored, PlaylistResolver.pick(stored, stored.copy()))
+    }
+
+    @Test
+    fun emptyRemoteDoesNotEraseLocalItemsUnlessItIsARealClear() {
+        val local = ListeningPlaylist(
+            sinceEpochMs = day,
+            updatedAt = 100,
+            deviceId = "phone",
+            items = listOf(entry("a", day)),
+        )
+        assertEquals(local, PlaylistResolver.merge(local, null))
+        assertEquals(local, PlaylistResolver.merge(local, ListeningPlaylist()))
+        val olderEmpty = ListeningPlaylist(updatedAt = 40, deviceId = "car", items = emptyList())
+        assertEquals(local, PlaylistResolver.merge(local, olderEmpty))
+        val newerStub = ListeningPlaylist(updatedAt = 200, deviceId = "car", sinceEpochMs = day, items = emptyList())
+        assertEquals(local, PlaylistResolver.merge(local, newerStub))
+        val cleared = local.copy(updatedAt = 200, deviceId = "car", items = emptyList(), excludedKeys = listOf("a"))
+        assertEquals(cleared, PlaylistResolver.merge(local, cleared))
+        val newerItems = local.copy(updatedAt = 180, deviceId = "car", items = listOf(entry("b", day * 2)))
+        assertEquals(newerItems, PlaylistResolver.merge(local, newerItems))
+    }
+
+    @Test
+    fun rejectedPushKeepsTheLocalPlaylist() {
+        val local = ListeningPlaylist(sinceEpochMs = day, updatedAt = 100, deviceId = "phone", items = listOf(entry("a", day)))
+        val storedEmpty = ListeningPlaylist(updatedAt = 90, deviceId = "server", items = emptyList())
+        assertEquals(local, PlaylistResolver.afterPush(local, accepted = false, stored = storedEmpty))
+        assertEquals(local, PlaylistResolver.afterPush(local, accepted = true, stored = ListeningPlaylist()))
+        val echoed = local.copy(serverReceivedAt = 5)
+        assertEquals(echoed, PlaylistResolver.afterPush(local, accepted = true, stored = echoed))
     }
 
     private fun candidate(key: String, publishedAt: Long, title: String) = PlaylistCandidate(

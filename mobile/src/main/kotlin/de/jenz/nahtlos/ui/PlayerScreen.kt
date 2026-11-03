@@ -164,8 +164,9 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                 Column(Modifier.padding(24.dp)) {
                     Text("Nichts in der Wiedergabe.", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Wähle eine Folge. Die Position kommt vom letzten Gerät, sobald der Sync-Server antwortet.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        playback.error
+                            ?: "Wähle eine Folge. Die Wiedergabe startet lokal, eine neuere Position vom anderen Gerät wird danach übernommen.",
+                        color = if (playback.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }

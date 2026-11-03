@@ -18,6 +18,7 @@ import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.SerializationException
 import java.io.IOException
 import java.net.URLEncoder
 import javax.inject.Inject
@@ -77,14 +78,27 @@ class SyncClient @Inject constructor(
         return json.decodeFromString<ProgressBatchResponse>(result).results
     }
 
-    suspend fun getPlaylist(settings: ServerSettings): ListeningPlaylist {
-        val result = authed(settings, "/v1/playlist", "GET", null)
-        return json.decodeFromString(result)
+    /**
+     * Null when this server has no playlist route or the body is not a playlist.
+     * Callers keep the local document in that case.
+     */
+    suspend fun getPlaylist(settings: ServerSettings): ListeningPlaylist? {
+        return try {
+            json.decodeFromString(authed(settings, "/v1/playlist", "GET", null))
+        } catch (error: SyncHttpException) {
+            if (error.code == 404 || error.code == 405 || error.code == 501) null else throw error
+        } catch (error: SerializationException) {
+            null
+        }
     }
 
     suspend fun putPlaylist(settings: ServerSettings, playlist: ListeningPlaylist): PlaylistWriteResponse {
         val result = authed(settings, "/v1/playlist", "PUT", json.encodeToString(playlist))
-        return json.decodeFromString(result)
+        return try {
+            json.decodeFromString(result)
+        } catch (error: SerializationException) {
+            throw SyncHttpException(200, "Playlist-Antwort ist kein bekanntes Dokument")
+        }
     }
 
     suspend fun pairStart(serverUrl: String): PairStartResponse {
