@@ -92,9 +92,8 @@ class BoostService @Inject constructor(
         val balance = probe.balanceMsat?.let { formatSats(it) } ?: "Guthaben unbekannt"
         store.saveProbe(probe.alias, balance, probe.methods)
         val missing = listOf("pay_keysend", "pay_invoice").filter { it !in probe.methods && probe.methods.isNotEmpty() }
-        val info = if (probe.infoEvent) "" else " Kein Info-Event (kind 13194), Methoden kommen aus get_info."
         val gap = if (missing.isEmpty()) "" else " Es fehlt: ${missing.joinToString()}."
-        "Verbunden mit ${probe.alias}. $balance.$info$gap"
+        "Verbunden mit ${probe.alias}. $balance. Verschlüsselung NIP-44.$gap"
     }
 
     suspend fun disconnect() = guard {

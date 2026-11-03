@@ -1,17 +1,16 @@
 package de.jenz.nahtlos.core.wallet
 
-import de.jenz.nahtlos.wallet.Nip44
-import de.jenz.nahtlos.wallet.NostrEvent
+import de.jenz.nahtlos.wallet.NwcProtocol
 import de.jenz.nahtlos.wallet.NwcRequests
 import de.jenz.nahtlos.wallet.NwcUri
 import de.jenz.nahtlos.wallet.SecretScrub
 import de.jenz.nahtlos.wallet.WalletException
+import de.jenz.nahtlos.wallet.WalletInfo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -42,11 +41,10 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
 
     suspend fun probe(uri: NwcUri): WalletProbe {
         val infoEvent = readInfoEvent(uri)
-        if (infoEvent != null && infoEvent.contains('?')) throw nip04()
-        val fromEvent = infoEvent?.split(Regex("[\\s,]+")).orEmpty().filter { it.isNotBlank() }.map { it.lowercase() }
+        infoEvent.requireNip44()
         val info = call(uri, "get_info", NwcRequests.emptyParams(), INFO_TIMEOUT_MS)
         val fromCall = info["methods"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull?.lowercase() }.orEmpty()
-        val methods = (fromEvent + fromCall).distinct()
+        val methods = (infoEvent.methods + fromCall).distinct()
         val balance = if (methods.isEmpty() || "get_balance" in methods) {
             runCatching { call(uri, "get_balance", NwcRequests.emptyParams(), INFO_TIMEOUT_MS) }
                 .getOrNull()?.get("balance")?.jsonPrimitive?.longish()
@@ -54,17 +52,14 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
             null
         }
         val alias = info["alias"]?.jsonPrimitive?.contentOrNull?.ifBlank { null } ?: "Wallet"
-        return WalletProbe(alias, balance, methods, infoEvent != null)
+        return WalletProbe(alias, balance, methods, infoEvent = true)
     }
 
     suspend fun call(uri: NwcUri, method: String, paramsJson: String, timeoutMs: Long): JsonObject {
-        val plain = NwcRequests.envelope(method, paramsJson)
-        val content = Nip44.encryptTo(uri.secret, uri.walletPubkey, plain)
-        val event = NostrEvent.signed(
-            secretHex = uri.secret,
-            kind = NwcRequests.REQUEST,
-            tags = listOf(listOf("p", uri.walletPubkey)),
-            content = content,
+        val event = NwcProtocol.request(
+            uri,
+            method,
+            paramsJson,
             createdAt = System.currentTimeMillis() / 1000,
         )
         var down: Exception? = null
@@ -78,38 +73,45 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
         throw RelayUnreachable(down?.message ?: "Kein Relay erreichbar.")
     }
 
-    private suspend fun readInfoEvent(uri: NwcUri): String? {
+    private suspend fun readInfoEvent(uri: NwcUri): WalletInfo {
         for (relay in uri.relays) {
-            val socket = try {
-                connect(relay)
-            } catch (error: RelayUnreachable) {
-                continue
-            }
-            try {
-                val filter = """["REQ","info",{"kinds":[${NwcRequests.INFO}],"authors":["${uri.walletPubkey}"],"limit":1}]"""
-                socket.send(filter)
-                val deadline = System.nanoTime() + INFO_TIMEOUT_MS * 1_000_000
-                while (true) {
-                    val left = deadline - System.nanoTime()
-                    if (left <= 0) return null
-                    val text = withTimeoutOrNull(left / 1_000_000) { socket.incoming.receive() } ?: return null
-                    val element = runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonArray ?: continue
-                    val kind = element.firstOrNull()?.jsonPrimitive?.contentOrNull ?: continue
-                    if (kind == "EOSE") return null
-                    if (kind != "EVENT") continue
-                    val event = element.getOrNull(2)?.jsonObject ?: continue
-                    if (event["kind"]?.jsonPrimitive?.intOrNull != NwcRequests.INFO) continue
-                    return event["content"]?.jsonPrimitive?.contentOrNull
-                }
+            val found = try {
+                infoOnRelay(relay, uri.walletPubkey)
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
-                return null
-            } finally {
-                socket.close()
+                null
             }
+            if (found != null) return found
         }
-        return null
+        throw WalletException(NwcProtocol.missingInfo())
+    }
+
+    private suspend fun infoOnRelay(relay: String, walletPubkey: String): WalletInfo? {
+        val socket = connect(relay)
+        try {
+            socket.send("""["REQ","info",{"kinds":[${NwcRequests.INFO}],"authors":["$walletPubkey"],"limit":1}]""")
+            val deadline = System.nanoTime() + INFO_TIMEOUT_MS * 1_000_000
+            while (true) {
+                val left = deadline - System.nanoTime()
+                if (left <= 0) return null
+                val text = withTimeoutOrNull((left / 1_000_000).coerceAtLeast(1)) { socket.incoming.receive() } ?: return null
+                val element = runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonArray ?: continue
+                val kind = element.firstOrNull()?.jsonPrimitive?.contentOrNull ?: continue
+                if (kind == "EOSE") return null
+                if (kind != "EVENT") continue
+                val event = element.getOrNull(2)?.jsonObject ?: continue
+                if (event["kind"]?.jsonPrimitive?.intOrNull != NwcRequests.INFO) continue
+                val author = event["pubkey"]?.jsonPrimitive?.contentOrNull?.lowercase()
+                if (author != walletPubkey) continue
+                val tags = event["tags"]?.jsonArray?.map { tag ->
+                    tag.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+                }.orEmpty()
+                return WalletInfo.parse(event["content"]?.jsonPrimitive?.contentOrNull.orEmpty(), tags)
+            }
+        } finally {
+            socket.close()
+        }
     }
 
     private suspend fun exchange(relay: String, uri: NwcUri, event: de.jenz.nahtlos.wallet.SignedEvent, timeoutMs: Long): JsonObject {
@@ -158,9 +160,9 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
                 } == true
                 if (!matches) return null
                 val content = event["content"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                if (content.contains('?')) throw nip04()
+                if (content.contains('?')) throw WalletException(NwcProtocol.nip04Only())
                 val plain = try {
-                    Nip44.decryptFrom(uri.secret, uri.walletPubkey, content)
+                    NwcProtocol.decryptResponse(uri, content)
                 } catch (error: WalletException) {
                     if (error.message?.contains("NIP-04") == true) throw error
                     throw WalletException("Die Wallet-Antwort ließ sich nicht mit NIP-44 öffnen. NIP-04-Wallets werden nicht unterstützt.")
@@ -172,14 +174,8 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
     }
 
     private fun parseResult(plain: String, secret: String): JsonObject {
+        NwcProtocol.failureMessage(plain)?.let { throw WalletException(SecretScrub.message(it, secret)) }
         val obj = json.parseToJsonElement(plain).jsonObject
-        val error = obj["error"]
-        if (error != null && error !is JsonNull) {
-            val message = runCatching { error.jsonObject["message"]?.jsonPrimitive?.contentOrNull }.getOrNull()
-                ?: error.jsonPrimitive.contentOrNull
-                ?: "Das Wallet hat die Anfrage abgelehnt."
-            throw WalletException(SecretScrub.message(message, secret))
-        }
         return obj["result"] as? JsonObject ?: JsonObject(emptyMap())
     }
 
@@ -233,9 +229,6 @@ class NwcClient @Inject constructor(private val http: OkHttpClient) {
             incoming.close()
         }
     }
-
-    private fun nip04(): WalletException =
-        WalletException("Dieses Wallet spricht nur NIP-04. Nahtlos braucht NIP-44, zum Beispiel Alby Hub.")
 
     private fun kotlinx.serialization.json.JsonPrimitive.longish(): Long? = longOrNull ?: contentOrNull?.toLongOrNull()
 
