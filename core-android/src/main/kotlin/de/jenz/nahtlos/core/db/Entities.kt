@@ -25,6 +25,14 @@ data class PodcastEntity(
     @ColumnInfo(defaultValue = "OK")
     val refreshStatus: String = FeedRefresh.OK,
     val refreshError: String? = null,
+    @ColumnInfo(defaultValue = "[]")
+    val fundingJson: String = "[]",
+    @ColumnInfo(defaultValue = "[]")
+    val valueJson: String = "[]",
+    @ColumnInfo(defaultValue = "0")
+    val locked: Boolean = false,
+    @ColumnInfo(defaultValue = "{}")
+    val playbackJson: String = "{}",
 )
 
 @Entity(
@@ -46,6 +54,10 @@ data class EpisodeEntity(
     val chaptersUrl: String?,
     val transcriptsJson: String,
     val personsJson: String,
+    @ColumnInfo(defaultValue = "{}")
+    val extrasJson: String = "{}",
+    @ColumnInfo(defaultValue = "")
+    val transcriptCache: String = "",
 )
 
 @Entity(tableName = "progress")

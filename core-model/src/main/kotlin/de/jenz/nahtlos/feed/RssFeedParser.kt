@@ -2,10 +2,13 @@ package de.jenz.nahtlos.feed
 
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.FeedParseException
+import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
 import de.jenz.nahtlos.model.Person
+import de.jenz.nahtlos.model.Soundbite
 import de.jenz.nahtlos.model.TranscriptLink
+import de.jenz.nahtlos.model.ValueRecipient
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.Reader
@@ -59,6 +62,9 @@ class RssFeedParser(
         var guid: String? = null
         var author: String? = null
         val persons = mutableListOf<Person>()
+        val funding = mutableListOf<FundingLink>()
+        val value = mutableListOf<ValueRecipient>()
+        var locked = false
         val episodes = ArrayList<ParsedEpisode>()
         var seenFeed = false
         var seenNewer = false
@@ -77,12 +83,15 @@ class RssFeedParser(
                     "guid" -> if (seenFeed && guid == null) guid = cursor.text().ifBlank { null }
                     "person" -> if (seenFeed) cursor.person()?.let { persons += it }
                     "image", "icon" -> if (seenFeed && image == null) image = cursor.image()
-                    "item", "entry" -> if (!seenFeed) {
+                    "funding" -> if (seenFeed) cursor.funding()?.let { funding += it }
+                    "locked" -> if (seenFeed) locked = cursor.text().equals("yes", ignoreCase = true)
+                    "value" -> if (seenFeed && value.isEmpty()) value += cursor.valueRecipients()
+                    "item", "entry", "liveItem" -> if (!seenFeed) {
                         cursor.skip()
                     } else if (stopItems) {
                         cursor.skip()
                     } else {
-                        cursor.item(image)?.let { episode ->
+                        cursor.item(image, live = cursor.local() == "liveItem")?.let { episode ->
                             val published = episode.publishedAtEpochMs
                             val tooOld = publishedAfterEpochMs != null && published != null && published < publishedAfterEpochMs
                             if (tooOld) {
@@ -113,6 +122,9 @@ class RssFeedParser(
             author = author,
             persons = persons,
             episodes = episodes,
+            funding = funding,
+            locked = locked,
+            value = value,
         )
     }
 
@@ -128,7 +140,7 @@ class RssFeedParser(
     private class Cursor(private val xml: XmlPullParser) {
         fun local(): String = xml.name ?: ""
 
-        fun item(channelImage: String?): ParsedEpisode? {
+        fun item(channelImage: String?, live: Boolean = false): ParsedEpisode? {
             var title = ""
             var description = ""
             var encoded = ""
@@ -144,6 +156,11 @@ class RssFeedParser(
             val chapters = mutableListOf<Chapter>()
             val transcripts = mutableListOf<TranscriptLink>()
             val persons = mutableListOf<Person>()
+            val soundbites = mutableListOf<Soundbite>()
+            val value = mutableListOf<ValueRecipient>()
+            var season: Int? = null
+            var episodeNumber: String? = null
+            var bestBitrate = -1
             var depth = 1
             while (depth > 0) {
                 when (nextOrEnd()) {
@@ -162,10 +179,26 @@ class RssFeedParser(
                             "pubDate", "published" -> pubDate = text()
                             "updated" -> if (pubDate == null) pubDate = text()
                             "enclosure" -> {
-                                enclosureUrl = attr("url")
-                                mimeType = attr("type")
+                                val bitrate = attr("bitrate")?.toIntOrNull() ?: 0
+                                if (bitrate >= bestBitrate || enclosureUrl == null) {
+                                    enclosureUrl = attr("url")
+                                    mimeType = attr("type")
+                                    bestBitrate = bitrate
+                                }
                                 skip()
                             }
+                            "alternateEnclosure" -> {
+                                val choice = alternateEnclosure()
+                                if (choice != null && choice.bitrate >= bestBitrate) {
+                                    enclosureUrl = choice.url
+                                    mimeType = choice.type
+                                    bestBitrate = choice.bitrate
+                                }
+                            }
+                            "soundbite" -> soundbite()?.let { soundbites += it }
+                            "season" -> season = text().toIntOrNull()
+                            "episode" -> episodeNumber = text().ifBlank { null }
+                            "value" -> value += valueRecipients()
                             "link" -> {
                                 val href = attr("href")
                                 if (attr("rel") == "enclosure" && !href.isNullOrBlank()) {
@@ -198,9 +231,10 @@ class RssFeedParser(
                 }
             }
             val url = enclosureUrl ?: return null
+            val rawHtml = encoded.ifBlank { description }.ifBlank { summary }
             return ParsedEpisode(
                 title = title.ifBlank { "Ohne Titel" },
-                description = plainText(encoded.ifBlank { description.ifBlank { summary } }),
+                description = plainText(rawHtml),
                 guid = guid,
                 enclosureUrl = url,
                 mimeType = mimeType,
@@ -212,7 +246,83 @@ class RssFeedParser(
                 chaptersType = chaptersType,
                 transcripts = transcripts,
                 persons = persons,
+                descriptionHtml = rawHtml.take(8_000),
+                season = season,
+                episodeNumber = episodeNumber,
+                live = live,
+                soundbites = soundbites,
+                value = value,
             )
+        }
+
+        fun funding(): FundingLink? {
+            val url = attr("url") ?: run {
+                skip()
+                return null
+            }
+            val title = text().ifBlank { "Unterstützen" }
+            return FundingLink(url, title)
+        }
+
+        fun valueRecipients(): List<ValueRecipient> {
+            val found = mutableListOf<ValueRecipient>()
+            var depth = 1
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
+                        if (depth == 1 && local() == "valueRecipient") {
+                            val recipient = ValueRecipient(
+                                name = attr("name"),
+                                type = attr("type"),
+                                address = attr("address"),
+                                split = attr("split")?.toIntOrNull(),
+                            )
+                            if (!recipient.address.isNullOrBlank() || !recipient.name.isNullOrBlank()) found += recipient
+                            skip()
+                        } else {
+                            depth++
+                        }
+                    }
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return found
+                }
+            }
+            return found
+        }
+
+        private fun soundbite(): Soundbite? {
+            val start = attr("startTime")?.toDoubleOrNull() ?: run {
+                skip()
+                return null
+            }
+            val duration = attr("duration")?.toDoubleOrNull()
+            val title = text().ifBlank { "Soundbite" }
+            return Soundbite((start * 1000).toLong(), duration?.let { (it * 1000).toLong() }, title)
+        }
+
+        private data class EnclosureChoice(val url: String, val type: String?, val bitrate: Int)
+
+        private fun alternateEnclosure(): EnclosureChoice? {
+            val type = attr("type")
+            val bitrate = attr("bitrate")?.toIntOrNull() ?: 0
+            var uri: String? = null
+            var depth = 1
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
+                        if (depth == 1 && local() == "source") {
+                            uri = uri ?: attr("uri")
+                            skip()
+                        } else {
+                            depth++
+                        }
+                    }
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> break
+                }
+            }
+            val url = uri ?: return null
+            return EnclosureChoice(url, type, bitrate)
         }
 
         fun link(): String? {

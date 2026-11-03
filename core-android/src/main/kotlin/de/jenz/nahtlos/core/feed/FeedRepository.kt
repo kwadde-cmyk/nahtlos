@@ -10,7 +10,15 @@ import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.db.chapters
 import de.jenz.nahtlos.core.db.toEntity
 import de.jenz.nahtlos.core.db.toPodcast
+import de.jenz.nahtlos.core.artwork.ArtworkStore
+import de.jenz.nahtlos.core.db.PodcastPlayback
+import de.jenz.nahtlos.core.db.cachedCues
+import de.jenz.nahtlos.core.db.extras
+import de.jenz.nahtlos.core.db.playback
+import de.jenz.nahtlos.core.db.transcripts
 import de.jenz.nahtlos.core.net.Net
+import de.jenz.nahtlos.feed.TranscriptParser
+import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.ChapterJsonParser
 import de.jenz.nahtlos.feed.EpisodeHorizon
@@ -39,6 +47,7 @@ class FeedRepository @Inject constructor(
     private val parser: Provider<RssFeedParser>,
     private val chapters: ChapterJsonParser,
     private val settings: SettingsStore,
+    private val artwork: ArtworkStore,
 ) {
     fun observePodcasts(): Flow<List<PodcastEntity>> = db.podcasts().observeAll()
 
@@ -156,6 +165,57 @@ class FeedRepository @Inject constructor(
         fetched
     }
 
+    suspend fun savePlayback(podcastId: String, playback: PodcastPlayback) = withContext(Dispatchers.IO) {
+        db.podcasts().updatePlayback(podcastId, NahtlosJson.json.encodeToString(playback))
+    }
+
+    suspend fun playbackForEpisode(episodeKey: String): PodcastPlayback? = withContext(Dispatchers.IO) {
+        val episode = db.episodes().get(episodeKey) ?: return@withContext null
+        db.podcasts().get(episode.podcastId)?.playback()
+    }
+
+    suspend fun podcastIdForEpisode(episodeKey: String): String? =
+        db.episodes().get(episodeKey)?.podcastId
+
+    suspend fun ensureTranscript(episodeKey: String): List<TranscriptCue> = withContext(Dispatchers.IO) {
+        val episode = db.episodes().get(episodeKey) ?: return@withContext emptyList()
+        val cached = episode.cachedCues()
+        if (cached.isNotEmpty()) return@withContext cached
+        val link = episode.transcripts().firstOrNull() ?: return@withContext emptyList()
+        val body = try {
+            withTimeout(12_000) { net.getText(link.url, maxBytes = 400_000) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return@withContext emptyList()
+        }
+        val cues = TranscriptParser.parse(body.take(200_000), link.type).take(4_000)
+        if (cues.isNotEmpty()) {
+            db.episodes().updateTranscript(episodeKey, NahtlosJson.json.encodeToString(cues))
+        }
+        cues
+    }
+
+    suspend fun chapterJump(episodeKey: String, positionMs: Long, direction: Int): Long? = withContext(Dispatchers.IO) {
+        val chapters = ensureChapters(episodeKey).sortedBy { it.startMs }
+        if (chapters.isEmpty()) return@withContext null
+        val index = chapters.indexOfLast { it.startMs <= positionMs }.coerceAtLeast(0)
+        val next = (index + direction).coerceIn(0, chapters.lastIndex)
+        chapters[next].startMs
+    }
+
+    fun episodeLabel(episode: de.jenz.nahtlos.core.db.EpisodeEntity): String {
+        val extra = episode.extras()
+        return buildString {
+            if (extra.live) append("Live")
+            if (extra.season != null || extra.episodeNumber != null) {
+                if (isNotEmpty()) append(" · ")
+                extra.season?.let { append("S$it ") }
+                extra.episodeNumber?.let { append("E$it") }
+            }
+        }.trim()
+    }
+
     private suspend fun refreshUrl(url: String, markNeedsSync: Boolean): PodcastEntity {
         val existing = db.podcasts().byFeedUrl(url)
         if (existing != null) {
@@ -179,7 +239,11 @@ class FeedRepository @Inject constructor(
                         needsSync = markNeedsSync,
                         fetchedAt = System.currentTimeMillis(),
                         existingId = existing?.id,
-                    ).copy(refreshStatus = FeedRefresh.OK, refreshError = null)
+                    ).copy(
+                        refreshStatus = FeedRefresh.OK,
+                        refreshError = null,
+                        playbackJson = existing?.playbackJson ?: "{}",
+                    )
                     podcast to parsed.episodes.map { it.toEntity(podcast) }
                 }
             }
@@ -190,6 +254,7 @@ class FeedRepository @Inject constructor(
                     db.episodes().upsertAll(chunk)
                 }
             }
+            runCatching { artwork.ensure(podcast.imageUrl) }
             return podcast
         } catch (timeout: TimeoutCancellationException) {
             existing?.let { markFailed(it.id, "Zeitüberschreitung") }

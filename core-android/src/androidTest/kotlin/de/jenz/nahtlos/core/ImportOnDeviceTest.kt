@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
@@ -51,15 +52,16 @@ class ImportOnDeviceTest {
     fun hoppAndPocketCastsImportsStoreTitlesWithoutDownloading() = runBlocking(Dispatchers.IO) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, NahtlosDatabase::class.java).build()
-        val client = OkHttpClient.Builder().addInterceptor {
+        val http = OkHttpClient.Builder().addInterceptor {
             throw IOException("Import darf noch keinen Feed laden")
         }.build()
         val repo = FeedRepository(
             db,
-            Net(client),
+            Net(http),
             Provider { RssFeedParser() },
             ChapterJsonParser(),
             SettingsStore(context),
+            ArtworkStore(context, http),
         )
         try {
             for (name in listOf("hopp-export.xml", "pocketcasts-export.xml")) {

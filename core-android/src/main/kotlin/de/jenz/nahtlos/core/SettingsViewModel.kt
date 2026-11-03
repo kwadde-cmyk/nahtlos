@@ -7,6 +7,7 @@ import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import de.jenz.nahtlos.playback.PlaybackTuning
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,6 +31,9 @@ data class SettingsUi(
     val downloadLimitMb: Int = 2048,
     val deletePlayedAfterHours: Int = 24,
     val episodeHorizonId: String = EpisodeHorizon.DEFAULT.id,
+    val playbackSpeed: Float = PlaybackTuning.DEFAULT_SPEED,
+    val skipBackSec: Int = PlaybackTuning.DEFAULT_SKIP_BACK_SEC,
+    val skipForwardSec: Int = PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC,
     val message: String? = null,
     val messageIsError: Boolean = false,
 )
@@ -53,6 +57,9 @@ class SettingsViewModel @Inject constructor(
             downloadLimitMb = stored.downloadLimitMb,
             deletePlayedAfterHours = stored.deletePlayedAfterHours,
             episodeHorizonId = stored.episodeHorizonId,
+            playbackSpeed = stored.playbackSpeed,
+            skipBackSec = stored.skipBackSec,
+            skipForwardSec = stored.skipForwardSec,
             message = status.lastError,
             messageIsError = status.lastError != null,
         )
@@ -67,6 +74,9 @@ class SettingsViewModel @Inject constructor(
                 downloadLimitMb = it.downloadLimitMb,
                 deletePlayedAfterHours = it.deletePlayedAfterHours,
                 episodeHorizonId = it.episodeHorizonId,
+                playbackSpeed = it.playbackSpeed,
+                skipBackSec = it.skipBackSec,
+                skipForwardSec = it.skipForwardSec,
             )
         },
     )
@@ -94,6 +104,38 @@ class SettingsViewModel @Inject constructor(
             downloadLimitMb = downloadLimitMb,
             deletePlayedAfterHours = deletePlayedAfterHours,
             episodeHorizonId = episodeHorizonId,
+        )
+    }
+
+    fun nudgeSpeed(direction: Int) {
+        val current = settings.read()
+        savePlayback(
+            current.copy(playbackSpeed = PlaybackTuning.nudgeSpeed(current.playbackSpeed, direction)),
+        )
+    }
+
+    fun nudgeSkip(back: Boolean, delta: Int) {
+        val current = settings.read()
+        savePlayback(
+            if (back) current.copy(skipBackSec = PlaybackTuning.clampSkipSeconds(current.skipBackSec + delta))
+            else current.copy(skipForwardSec = PlaybackTuning.clampSkipSeconds(current.skipForwardSec + delta)),
+        )
+    }
+
+    private fun savePlayback(current: de.jenz.nahtlos.core.sync.ServerSettings) {
+        settings.save(
+            serverUrl = current.serverUrl,
+            token = current.token,
+            bufferAheadMinutes = current.bufferAheadMinutes,
+            downloadOnUnmeteredOnly = current.downloadOnUnmeteredOnly,
+            downloadLimitMb = current.downloadLimitMb,
+            deletePlayedAfterHours = current.deletePlayedAfterHours,
+            episodeHorizonId = current.episodeHorizonId,
+            playbackSpeed = current.playbackSpeed,
+            skipBackSec = current.skipBackSec,
+            skipForwardSec = current.skipForwardSec,
+            skipSilence = current.skipSilence,
+            volumeBoost = current.volumeBoost,
         )
     }
 

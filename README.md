@@ -70,6 +70,12 @@ Ein OPML-Import schreibt sofort nur Titel und Feed-URL, lädt die OPML wie bishe
 
 Der Parser ist ein Pull-Parser (`XmlPullParser`, auf dem Handy die Android-Implementierung, in den JVM-Tests kxml2). StAX/`javax.xml.stream` wird nicht verwendet. Beim Aktualisieren gilt die Einstellung „Folgen nachladen für die letzten …“ (Standard 4 Wochen; 1 oder 2 Wochen, 3 oder 6 Monate, 1 Jahr, oder alle). Ist der Feed nach Datum absteigend sortiert, bricht das Lesen ab, sobald die Folgen älter als das Fenster sind. Folgen, die schon gespeichert sind — insbesondere mit Position oder in der Playlist — werden nicht gelöscht. Die Playlist „seit Datum“ sieht nur Folgen, die in der Datenbank stehen. Ein einzelner kaputter Feed markiert nur sich selbst als Fehler und reißt den Rest nicht mit.
 
+Cover lädt Coil mit Speicher-Cache und 250 MB Disk-Cache. Fürs Auto legt die App die Bilder lokal ab und gibt sie über `content://` an den MediaBrowser, damit das Headunit sie nicht neu lädt.
+
+Wiedergabe: Tempo 0,5× bis 3,0× in 0,1-Schritten (global und pro Podcast), Stille überspringen, Lautstärke-Anhebung, Sprung vor/zurück, Intro- und Outro-Schnitt pro Podcast. Der Schlaf-Timer gibt es nur am Telefon. Im Auto sind Tempo, Sprung und Kapitel eigene MediaSession-Aktionen; der Einrichtungsbildschirm bleibt ohne `distractionOptimized`.
+
+Podcasting 2.0: Kapitel (JSON, im Player mit Bild und Link, im Auto vor/zurück, aktueller Kapiteltitel als Untertitel nach dem Sprung), Transkript mit Markierung und Sprung, Personen, Funding, Soundbite, Staffel/Folge, locked, alternateEnclosure, liveItem und Value-Empfänger (nur Anzeige, keine Zahlung). Shownotes mit HTML werden im Player gerendert. Tempo und Schalter pro Podcast bleiben auf dem Gerät; sie werden nicht mit dem Server synchronisiert.
+
 Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Unter Einstellungen lässt er sich lesen, teilen und löschen.
 
 ### AAOS

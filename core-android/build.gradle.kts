@@ -45,6 +45,7 @@ dependencies {
     implementation(libs.coroutines.guava)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.coil)
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core:1.6.1")

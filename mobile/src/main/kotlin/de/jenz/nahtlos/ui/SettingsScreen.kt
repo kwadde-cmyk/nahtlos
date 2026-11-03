@@ -52,6 +52,7 @@ import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import de.jenz.nahtlos.playback.PlaybackTuning
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -170,6 +171,18 @@ fun SettingsScreen(
             HorizonChoices(horizon) { id ->
                 horizon = id
                 viewModel.setEpisodeHorizon(id)
+            }
+            Text("Wiedergabe", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                "Tempo ${"%.1f".format(state.playbackSpeed)}×, Sprung zurück ${state.skipBackSec}s, vor ${state.skipForwardSec}s. Pro Podcast lässt sich das im Player überschreiben.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row {
+                TextButton(onClick = { viewModel.nudgeSpeed(-1) }) { Text("Langsamer") }
+                TextButton(onClick = { viewModel.nudgeSpeed(1) }) { Text("Schneller") }
+                TextButton(onClick = { viewModel.nudgeSkip(back = true, delta = -5) }) { Text("−5s zurück") }
+                TextButton(onClick = { viewModel.nudgeSkip(back = false, delta = 5) }) { Text("+5s vor") }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Downloads nur ohne Mobilfunk", modifier = Modifier.weight(1f))

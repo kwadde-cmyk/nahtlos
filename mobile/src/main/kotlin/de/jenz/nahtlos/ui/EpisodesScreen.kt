@@ -46,6 +46,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.db.EpisodeRow
 import de.jenz.nahtlos.core.db.PodcastEntity
+import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.persons
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRepository
@@ -249,6 +250,21 @@ private fun EpisodeRowItem(row: EpisodeRow, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
+        val extra = episode.extras()
+        val badge = buildString {
+            if (extra.live) append("Live")
+            if (extra.season != null || !extra.episodeNumber.isNullOrBlank()) {
+                if (isNotEmpty()) append(" · ")
+                extra.season?.let { append("Staffel $it") }
+                extra.episodeNumber?.let {
+                    if (extra.season != null) append(" ")
+                    append("Folge $it")
+                }
+            }
+        }
+        if (badge.isNotBlank()) {
+            Text(badge, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        }
         Text(episode.title, style = MaterialTheme.typography.titleMedium)
         val meta = listOfNotNull(
             formatDate(episode.publishedAt).takeIf { it.isNotBlank() },

@@ -35,6 +35,9 @@ interface PodcastDao {
     @Query("UPDATE podcasts SET refreshStatus = :status, refreshError = :error WHERE id = :id")
     suspend fun setRefresh(id: String, status: String, error: String?)
 
+    @Query("UPDATE podcasts SET playbackJson = :json WHERE id = :id")
+    suspend fun updatePlayback(id: String, json: String)
+
     @Query("SELECT * FROM podcasts WHERE refreshStatus = 'PENDING'")
     suspend fun pending(): List<PodcastEntity>
 
@@ -81,6 +84,9 @@ interface EpisodeDao {
 
     @Query("UPDATE episodes SET chaptersJson = :chaptersJson WHERE episodeKey = :episodeKey")
     suspend fun updateChapters(episodeKey: String, chaptersJson: String)
+
+    @Query("UPDATE episodes SET transcriptCache = :cache WHERE episodeKey = :episodeKey")
+    suspend fun updateTranscript(episodeKey: String, cache: String)
 
     @Query("DELETE FROM episodes WHERE podcastId = :podcastId")
     suspend fun deleteForPodcast(podcastId: String)

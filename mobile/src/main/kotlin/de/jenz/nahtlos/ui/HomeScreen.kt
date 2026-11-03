@@ -60,6 +60,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.db.ContinueRow
 import de.jenz.nahtlos.core.db.PodcastEntity
@@ -486,8 +488,15 @@ fun Artwork(url: String?, title: String, modifier: Modifier = Modifier) {
             Text(title.take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     } else {
+        val context = LocalContext.current
         AsyncImage(
-            model = url,
+            model = ImageRequest.Builder(context)
+                .data(url)
+                .size(256)
+                .memoryCacheKey(url)
+                .diskCacheKey(url)
+                .crossfade(false)
+                .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier.clip(shape),
