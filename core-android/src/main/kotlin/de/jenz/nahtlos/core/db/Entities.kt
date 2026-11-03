@@ -33,6 +33,8 @@ data class PodcastEntity(
     val locked: Boolean = false,
     @ColumnInfo(defaultValue = "{}")
     val playbackJson: String = "{}",
+    @ColumnInfo(defaultValue = "{}")
+    val extrasJson: String = "{}",
 )
 
 @Entity(

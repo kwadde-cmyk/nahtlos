@@ -1,12 +1,18 @@
 package de.jenz.nahtlos.feed
 
+import de.jenz.nahtlos.model.AlternateSource
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.FeedParseException
 import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
 import de.jenz.nahtlos.model.Person
+import de.jenz.nahtlos.model.PodLicense
+import de.jenz.nahtlos.model.PodLocation
+import de.jenz.nahtlos.model.PodTxt
+import de.jenz.nahtlos.model.RemoteItem
 import de.jenz.nahtlos.model.Soundbite
+import de.jenz.nahtlos.model.Trailer
 import de.jenz.nahtlos.model.TranscriptLink
 import de.jenz.nahtlos.model.ValueRecipient
 import org.xmlpull.v1.XmlPullParser
@@ -64,6 +70,13 @@ class RssFeedParser(
         val persons = mutableListOf<Person>()
         val funding = mutableListOf<FundingLink>()
         val value = mutableListOf<ValueRecipient>()
+        var valueMethod: String? = null
+        var valueSuggested: String? = null
+        var location: PodLocation? = null
+        var license: PodLicense? = null
+        val txt = mutableListOf<PodTxt>()
+        val trailers = mutableListOf<Trailer>()
+        val podroll = mutableListOf<RemoteItem>()
         var locked = false
         val episodes = ArrayList<ParsedEpisode>()
         var seenFeed = false
@@ -85,7 +98,17 @@ class RssFeedParser(
                     "image", "icon" -> if (seenFeed && image == null) image = cursor.image()
                     "funding" -> if (seenFeed) cursor.funding()?.let { funding += it }
                     "locked" -> if (seenFeed) locked = cursor.text().equals("yes", ignoreCase = true)
-                    "value" -> if (seenFeed && value.isEmpty()) value += cursor.valueRecipients()
+                    "value" -> if (seenFeed && value.isEmpty()) {
+                        val block = cursor.valueBlock()
+                        value += block.recipients
+                        valueMethod = block.method
+                        valueSuggested = block.suggested
+                    }
+                    "location" -> if (seenFeed && location == null) location = cursor.location()
+                    "license" -> if (seenFeed && license == null) license = cursor.license()
+                    "txt" -> if (seenFeed) cursor.txtTag()?.let { txt += it }
+                    "trailer" -> if (seenFeed) cursor.trailer()?.let { trailers += it }
+                    "podroll" -> if (seenFeed && podroll.isEmpty()) podroll += cursor.podroll()
                     "item", "entry", "liveItem" -> if (!seenFeed) {
                         cursor.skip()
                     } else if (stopItems) {
@@ -125,6 +148,13 @@ class RssFeedParser(
             funding = funding,
             locked = locked,
             value = value,
+            valueMethod = valueMethod,
+            valueSuggested = valueSuggested,
+            location = location,
+            license = license,
+            txt = txt,
+            trailers = trailers,
+            podroll = podroll,
         )
     }
 
@@ -161,6 +191,13 @@ class RssFeedParser(
             var season: Int? = null
             var episodeNumber: String? = null
             var bestBitrate = -1
+            val alternates = mutableListOf<AlternateSource>()
+            var location: PodLocation? = null
+            var license: PodLicense? = null
+            val txt = mutableListOf<PodTxt>()
+            var valueMethod: String? = null
+            var valueSuggested: String? = null
+            val liveStatus = attr("status")
             var depth = 1
             while (depth > 0) {
                 when (nextOrEnd()) {
@@ -189,16 +226,27 @@ class RssFeedParser(
                             }
                             "alternateEnclosure" -> {
                                 val choice = alternateEnclosure()
-                                if (choice != null && choice.bitrate >= bestBitrate) {
-                                    enclosureUrl = choice.url
-                                    mimeType = choice.type
-                                    bestBitrate = choice.bitrate
+                                if (choice != null) {
+                                    alternates += AlternateSource(choice.url, choice.type, choice.bitrate)
+                                    if (choice.bitrate >= bestBitrate || enclosureUrl == null) {
+                                        enclosureUrl = choice.url
+                                        mimeType = choice.type
+                                        bestBitrate = choice.bitrate
+                                    }
                                 }
                             }
                             "soundbite" -> soundbite()?.let { soundbites += it }
                             "season" -> season = text().toIntOrNull()
                             "episode" -> episodeNumber = text().ifBlank { null }
-                            "value" -> value += valueRecipients()
+                            "value" -> {
+                                val block = valueBlock()
+                                value += block.recipients
+                                valueMethod = block.method
+                                valueSuggested = block.suggested
+                            }
+                            "location" -> if (location == null) location = location()
+                            "license" -> if (license == null) license = license()
+                            "txt" -> txtTag()?.let { txt += it }
                             "link" -> {
                                 val href = attr("href")
                                 if (attr("rel") == "enclosure" && !href.isNullOrBlank()) {
@@ -249,9 +297,19 @@ class RssFeedParser(
                 descriptionHtml = rawHtml.take(8_000),
                 season = season,
                 episodeNumber = episodeNumber,
-                live = live,
+                live = live || liveStatus.equals("live", ignoreCase = true),
+                liveStatus = liveStatus,
                 soundbites = soundbites,
                 value = value,
+                valueMethod = valueMethod,
+                valueSuggested = valueSuggested,
+                alternates = if (enclosureUrl == null) alternates else {
+                    if (alternates.any { it.url == enclosureUrl }) alternates
+                    else listOf(AlternateSource(enclosureUrl, mimeType, bestBitrate.coerceAtLeast(0))) + alternates
+                },
+                location = location,
+                license = license,
+                txt = txt,
             )
         }
 
@@ -262,6 +320,69 @@ class RssFeedParser(
             }
             val title = text().ifBlank { "Unterstützen" }
             return FundingLink(url, title)
+        }
+
+        data class ValueBlock(val method: String?, val suggested: String?, val recipients: List<ValueRecipient>)
+
+        fun valueBlock(): ValueBlock = ValueBlock(attr("method"), attr("suggested"), valueRecipients())
+
+        fun podroll(): List<RemoteItem> {
+            val found = mutableListOf<RemoteItem>()
+            var depth = 1
+            while (depth > 0) {
+                when (nextOrEnd()) {
+                    XmlPullParser.START_TAG -> {
+                        if (depth == 1 && local() == "remoteItem") found += remoteItem() else depth++
+                    }
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> return found
+                }
+            }
+            return found
+        }
+
+        fun remoteItem(): RemoteItem {
+            val item = RemoteItem(
+                feedGuid = attr("feedGuid"),
+                feedUrl = attr("feedUrl"),
+                itemGuid = attr("itemGuid"),
+                title = attr("title"),
+                medium = attr("medium"),
+            )
+            skip()
+            return item
+        }
+
+        fun trailer(): Trailer? {
+            val url = attr("url") ?: run {
+                skip()
+                return null
+            }
+            val season = attr("season")
+            val title = text().ifBlank { "Trailer" }
+            return Trailer(url, title, season)
+        }
+
+        fun location(): PodLocation? {
+            val geo = attr("geo")
+            val osm = attr("osm")
+            val name = text()
+            if (name.isBlank() && geo == null && osm == null) return null
+            return PodLocation(name, geo, osm)
+        }
+
+        fun license(): PodLicense? {
+            val url = attr("url").orEmpty()
+            val name = text()
+            if (url.isBlank() && name.isBlank()) return null
+            return PodLicense(url, name)
+        }
+
+        fun txtTag(): PodTxt? {
+            val purpose = attr("purpose")
+            val value = text()
+            if (value.isBlank()) return null
+            return PodTxt(purpose, value)
         }
 
         fun valueRecipients(): List<ValueRecipient> {

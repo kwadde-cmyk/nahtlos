@@ -11,6 +11,8 @@ import de.jenz.nahtlos.core.db.chapters
 import de.jenz.nahtlos.core.db.toEntity
 import de.jenz.nahtlos.core.db.toPodcast
 import de.jenz.nahtlos.core.artwork.ArtworkStore
+import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.feed.Id3Chapters
 import de.jenz.nahtlos.core.db.PodcastPlayback
 import de.jenz.nahtlos.core.db.cachedCues
 import de.jenz.nahtlos.core.db.extras
@@ -48,6 +50,8 @@ class FeedRepository @Inject constructor(
     private val chapters: ChapterJsonParser,
     private val settings: SettingsStore,
     private val artwork: ArtworkStore,
+    private val downloads: DownloadStore,
+    private val index: PodcastIndexClient,
 ) {
     fun observePodcasts(): Flow<List<PodcastEntity>> = db.podcasts().observeAll()
 
@@ -149,20 +153,32 @@ class FeedRepository @Inject constructor(
     suspend fun ensureChapters(episodeKey: String): List<Chapter> = withContext(Dispatchers.IO) {
         val episode = db.episodes().get(episodeKey) ?: return@withContext emptyList()
         val inline = episode.chapters()
-        if (inline.isNotEmpty() || episode.chaptersUrl.isNullOrBlank()) return@withContext inline
-        val fetched = try {
-            withTimeout(12_000) {
-                chapters.parse(net.getText(episode.chaptersUrl))
+        if (inline.isNotEmpty()) return@withContext inline
+        if (!episode.chaptersUrl.isNullOrBlank()) {
+            val fetched = try {
+                withTimeout(12_000) { chapters.parse(net.getText(episode.chaptersUrl)) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                emptyList()
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            emptyList()
+            if (fetched.isNotEmpty()) {
+                db.episodes().updateChapters(episodeKey, NahtlosJson.json.encodeToString(fetched))
+                return@withContext fetched
+            }
         }
-        if (fetched.isNotEmpty()) {
-            db.episodes().updateChapters(episodeKey, NahtlosJson.json.encodeToString(fetched))
+        val id3 = runCatching { downloads.existingFile(episodeKey)?.let { Id3Chapters.read(it) }.orEmpty() }.getOrDefault(emptyList())
+        if (id3.isNotEmpty()) {
+            runCatching { db.episodes().updateChapters(episodeKey, NahtlosJson.json.encodeToString(id3)) }
         }
-        fetched
+        id3
+    }
+
+    suspend fun useEnclosure(episodeKey: String, url: String) = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext
+        val episode = db.episodes().get(episodeKey) ?: return@withContext
+        val mime = episode.extras().alternates.firstOrNull { it.url == url }?.type ?: episode.mimeType
+        db.episodes().updateEnclosure(episodeKey, url, mime)
     }
 
     suspend fun savePlayback(podcastId: String, playback: PodcastPlayback) = withContext(Dispatchers.IO) {
@@ -216,7 +232,7 @@ class FeedRepository @Inject constructor(
         }.trim()
     }
 
-    private suspend fun refreshUrl(url: String, markNeedsSync: Boolean): PodcastEntity {
+    private suspend fun refreshUrl(url: String, markNeedsSync: Boolean, triedGuid: Boolean = false): PodcastEntity {
         val existing = db.podcasts().byFeedUrl(url)
         if (existing != null) {
             db.podcasts().setRefresh(existing.id, FeedRefresh.LOADING, null)
@@ -262,6 +278,16 @@ class FeedRepository @Inject constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            val guid = existing?.podcastGuid
+            if (!triedGuid && !guid.isNullOrBlank()) {
+                val keys = settings.read()
+                val hit = runCatching { index.byGuid(keys.podcastIndexKey, keys.podcastIndexSecret, guid) }.getOrNull()
+                val next = hit?.url?.let { EpisodeKeys.normalizeFeedUrl(it) }
+                if (!next.isNullOrBlank() && next != url) {
+                    db.podcasts().updateFeedUrl(existing.id, next)
+                    return refreshUrl(next, markNeedsSync, triedGuid = true)
+                }
+            }
             val message = (error as? FeedParseException)?.message ?: error.message
             existing?.let { markFailed(it.id, message) }
             if (error is FeedParseException) throw error

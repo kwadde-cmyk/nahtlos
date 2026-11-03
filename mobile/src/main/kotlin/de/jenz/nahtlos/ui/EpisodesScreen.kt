@@ -352,6 +352,14 @@ private fun EpisodeRowItem(row: EpisodeRow) {
         val extra = episode.extras()
         val badge = buildString {
             if (extra.live) append("Live")
+            if (episode.chaptersUrl != null || episode.chaptersJson != "[]") {
+                if (isNotEmpty()) append(" · ")
+                append("Kapitel")
+            }
+            if (episode.transcriptsJson != "[]") {
+                if (isNotEmpty()) append(" · ")
+                append("Transkript")
+            }
             if (extra.season != null || !extra.episodeNumber.isNullOrBlank()) {
                 if (isNotEmpty()) append(" · ")
                 extra.season?.let { append("Staffel $it") }

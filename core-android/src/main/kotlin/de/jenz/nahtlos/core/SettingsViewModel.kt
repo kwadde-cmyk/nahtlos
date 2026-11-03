@@ -36,6 +36,8 @@ data class SettingsUi(
     val skipForwardSec: Int = PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC,
     val swipeStart: de.jenz.nahtlos.playback.SwipeAction = de.jenz.nahtlos.playback.SwipeAction.START_DEFAULT,
     val swipeEnd: de.jenz.nahtlos.playback.SwipeAction = de.jenz.nahtlos.playback.SwipeAction.END_DEFAULT,
+    val podcastIndexKey: String = "",
+    val podcastIndexSecret: String = "",
     val message: String? = null,
     val messageIsError: Boolean = false,
 )
@@ -64,6 +66,8 @@ class SettingsViewModel @Inject constructor(
             skipForwardSec = stored.skipForwardSec,
             swipeStart = stored.swipeStart,
             swipeEnd = stored.swipeEnd,
+            podcastIndexKey = stored.podcastIndexKey,
+            podcastIndexSecret = stored.podcastIndexSecret,
             message = status.lastError,
             messageIsError = status.lastError != null,
         )
@@ -83,6 +87,8 @@ class SettingsViewModel @Inject constructor(
                 skipForwardSec = it.skipForwardSec,
                 swipeStart = it.swipeStart,
                 swipeEnd = it.swipeEnd,
+                podcastIndexKey = it.podcastIndexKey,
+                podcastIndexSecret = it.podcastIndexSecret,
             )
         },
     )
@@ -143,6 +149,18 @@ class SettingsViewModel @Inject constructor(
             skipSilence = current.skipSilence,
             volumeBoost = current.volumeBoost,
         )
+    }
+
+    fun saveIndex(key: String, secret: String) {
+        val current = settings.read()
+        settings.save(
+            serverUrl = current.serverUrl,
+            token = current.token,
+            bufferAheadMinutes = current.bufferAheadMinutes,
+            podcastIndexKey = key.trim(),
+            podcastIndexSecret = secret.trim(),
+        )
+        _notice.tryEmit(if (key.isBlank() || secret.isBlank()) "Podcast-Index-Suche aus" else "Podcast-Index-Schlüssel gespeichert")
     }
 
     fun setSwipe(start: Boolean, id: String) {

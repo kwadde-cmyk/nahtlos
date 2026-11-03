@@ -16,8 +16,14 @@ object TranscriptParser {
         val hint = type?.lowercase().orEmpty()
         return when {
             hint.contains("json") || trimmed.startsWith("{") || trimmed.startsWith("[") -> parseJson(trimmed)
-            hint.contains("html") || trimmed.startsWith("<") -> listOf(TranscriptCue(0, Long.MAX_VALUE, stripTags(trimmed)))
-            else -> parseTimed(trimmed)
+            hint.contains("html") || trimmed.startsWith("<") -> listOf(TranscriptCue(0, Long.MAX_VALUE, stripTags(trimmed).take(8_000)))
+            else -> {
+                val timed = parseTimed(trimmed)
+                if (timed.isNotEmpty()) timed
+                else if (hint.contains("plain") || hint == "text" || hint.contains("text/plain")) {
+                    listOf(TranscriptCue(0, Long.MAX_VALUE, stripTags(trimmed).take(8_000)))
+                } else timed
+            }
         }
     }
 

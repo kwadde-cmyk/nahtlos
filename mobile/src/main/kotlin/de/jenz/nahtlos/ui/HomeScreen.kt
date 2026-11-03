@@ -70,6 +70,8 @@ import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.feed.FeedRefresh
 import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.feed.PodcastHit
+import de.jenz.nahtlos.core.feed.PodcastIndexClient
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.playback.PlayerSnapshot
 import de.jenz.nahtlos.core.sync.SyncRepository
@@ -80,6 +82,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,6 +94,8 @@ class HomeViewModel @Inject constructor(
     private val sync: SyncRepository,
     private val player: PlayerConnection,
     private val feedRefresh: FeedRefreshWork,
+    private val index: PodcastIndexClient,
+    private val settingsStore: de.jenz.nahtlos.core.sync.SettingsStore,
 ) : ViewModel() {
     val podcasts = feeds.observePodcasts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val continueListening = feeds.observeContinue().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -98,6 +103,10 @@ class HomeViewModel @Inject constructor(
     val playerState = player.state
     private val _subscribe = MutableStateFlow<SubscribeState>(SubscribeState.Idle)
     val subscribe: StateFlow<SubscribeState> = _subscribe.asStateFlow()
+    val indexEnabled = settingsStore.observe().map { it.podcastIndexKey.isNotBlank() && it.podcastIndexSecret.isNotBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read().podcastIndexKey.isNotBlank())
+    private val _hits = MutableStateFlow<List<PodcastHit>>(emptyList())
+    val hits: StateFlow<List<PodcastHit>> = _hits.asStateFlow()
 
     init {
         player.connect()
@@ -106,6 +115,13 @@ class HomeViewModel @Inject constructor(
 
     fun onForeground() {
         viewModelScope.launch { sync.pullAndMerge() }
+    }
+
+    fun searchPodcasts(term: String) {
+        viewModelScope.launch {
+            val current = settingsStore.read()
+            _hits.value = runCatching { index.search(current.podcastIndexKey, current.podcastIndexSecret, term) }.getOrDefault(emptyList())
+        }
     }
 
     fun subscribe(rawUrl: String) {
@@ -208,6 +224,8 @@ fun HomeScreen(
     val continueRows by viewModel.continueListening.collectAsStateWithLifecycle()
     val status by viewModel.syncStatus.collectAsStateWithLifecycle()
     val subscribe by viewModel.subscribe.collectAsStateWithLifecycle()
+    val indexEnabled by viewModel.indexEnabled.collectAsStateWithLifecycle()
+    val hits by viewModel.hits.collectAsStateWithLifecycle()
     val selection = rememberSelection()
     var confirmUnsubscribe by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
@@ -344,6 +362,9 @@ fun HomeScreen(
     if (showAdd) {
         AddFeedDialog(
             state = subscribe,
+            indexEnabled = indexEnabled,
+            hits = hits,
+            onSearch = viewModel::searchPodcasts,
             onDismiss = {
                 showAdd = false
                 viewModel.dismissSubscribeError()
@@ -580,10 +601,14 @@ fun Artwork(url: String?, title: String, modifier: Modifier = Modifier) {
 @Composable
 private fun AddFeedDialog(
     state: SubscribeState,
+    indexEnabled: Boolean,
+    hits: List<PodcastHit>,
+    onSearch: (String) -> Unit,
     onDismiss: () -> Unit,
     onSubmit: (String) -> Unit,
 ) {
     var url by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
     var sawLoading by remember { mutableStateOf(false) }
     val loading = state is SubscribeState.Loading
     LaunchedEffect(state) {
@@ -592,10 +617,34 @@ private fun AddFeedDialog(
     }
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
-        title = { Text("RSS-Feed") },
+        title = { Text("Podcast hinzufügen") },
         text = {
             Column {
-                Text("Adresse des Podcast-Feeds, zum Beispiel https://example.com/feed.xml")
+                if (indexEnabled) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = {
+                            query = it
+                            onSearch(it)
+                        },
+                        singleLine = true,
+                        label = { Text("Suchen") },
+                        enabled = !loading,
+                    )
+                    hits.take(8).forEach { hit ->
+                        TextButton(onClick = { onSubmit(hit.url) }, enabled = !loading) {
+                            Text(listOf(hit.title, hit.author).filter { !it.isNullOrBlank() }.joinToString(" · "))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                } else {
+                    Text(
+                        "Die Podcast-Index-Suche ist aus. Schlüssel und Secret stehen in den Einstellungen. Eine RSS-Adresse geht auch ohne.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                Text("Oder die Adresse des Feeds, zum Beispiel https://example.com/feed.xml")
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = url,

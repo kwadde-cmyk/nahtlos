@@ -52,6 +52,9 @@ interface PodcastDao {
 
     @Query("DELETE FROM podcasts WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("UPDATE podcasts SET feedUrl = :feedUrl WHERE id = :id")
+    suspend fun updateFeedUrl(id: String, feedUrl: String)
 }
 
 @Dao
@@ -78,6 +81,9 @@ interface EpisodeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(entities: List<EpisodeEntity>)
+
+    @Query("UPDATE episodes SET enclosureUrl = :url, mimeType = :mime WHERE episodeKey = :episodeKey")
+    suspend fun updateEnclosure(episodeKey: String, url: String, mime: String?)
 
     @Query("UPDATE episodes SET durationMs = :durationMs WHERE episodeKey = :episodeKey")
     suspend fun updateDuration(episodeKey: String, durationMs: Long)
