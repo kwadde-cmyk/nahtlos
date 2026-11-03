@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -57,9 +58,16 @@ import de.jenz.nahtlos.core.db.persons
 import de.jenz.nahtlos.core.db.transcripts
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playback.PlayerConnection
+import de.jenz.nahtlos.core.db.extras
+import de.jenz.nahtlos.core.db.funding
+import de.jenz.nahtlos.core.db.valueRecipients
 import de.jenz.nahtlos.model.Chapter
+import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.Person
+import de.jenz.nahtlos.model.Soundbite
+import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.model.TranscriptLink
+import de.jenz.nahtlos.model.ValueRecipient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -72,6 +80,11 @@ data class EpisodeDetails(
     val chapters: List<Chapter> = emptyList(),
     val transcripts: List<TranscriptLink> = emptyList(),
     val persons: List<Person> = emptyList(),
+    val html: String = "",
+    val cues: List<TranscriptCue> = emptyList(),
+    val soundbites: List<Soundbite> = emptyList(),
+    val value: List<ValueRecipient> = emptyList(),
+    val funding: List<FundingLink> = emptyList(),
 )
 
 @HiltViewModel
@@ -98,18 +111,33 @@ class PlayerViewModel @Inject constructor(
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun seekBack() = player.seekBack()
     fun seekForward() = player.seekForward()
+    fun nudgeSpeed(direction: Int) = player.nudgeSpeed(direction)
+    fun toggleSilence() = player.toggleSilence()
+    fun toggleBoost() = player.toggleBoost()
+    fun sleepForMinutes(minutes: Int) = player.sleepForMinutes(minutes)
+    fun sleepAtEnd() = player.sleepAtEnd()
+    fun moreIntro() = player.moreIntro()
+    fun moreOutro() = player.moreOutro()
 
     private fun load(episodeKey: String) {
         viewModelScope.launch {
             val episode = feeds.getEpisode(episodeKey) ?: return@launch
+            val extra = episode.extras()
+            val podcast = feeds.getPodcast(episode.podcastId)
             _details.value = EpisodeDetails(
                 description = episode.description,
                 chapters = episode.chapters(),
                 transcripts = episode.transcripts(),
                 persons = episode.persons(),
+                html = extra.descriptionHtml,
+                soundbites = extra.soundbites,
+                value = extra.value + (podcast?.valueRecipients() ?: emptyList()),
+                funding = podcast?.funding() ?: emptyList(),
             )
             val remote = feeds.ensureChapters(episodeKey)
             if (remote.isNotEmpty()) _details.value = _details.value.copy(chapters = remote)
+            val cues = feeds.ensureTranscript(episodeKey)
+            if (cues.isNotEmpty()) _details.value = _details.value.copy(cues = cues)
         }
     }
 }
@@ -163,13 +191,14 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                         Text(playback.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (details.persons.isNotEmpty()) {
-                        Text(
-                            details.persons.joinToString { person ->
-                                if (person.role.isNullOrBlank()) person.name else "${person.name} · ${person.role}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
+                        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            details.persons.take(6).forEach { person ->
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Artwork(person.img, person.name, Modifier.size(48.dp))
+                                    Text(person.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                     SeekRow(playback.positionMs, playback.durationMs, viewModel::seekTo)
                     Row(
@@ -177,8 +206,25 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        TextButton(onClick = { viewModel.nudgeSpeed(-1) }) { Text("−0,1×") }
+                        Text("${"%.1f".format(playback.speed)}×", style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { viewModel.nudgeSpeed(1) }) { Text("+0,1×") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        TextButton(onClick = viewModel::toggleSilence) { Text("Stille") }
+                        TextButton(onClick = viewModel::toggleBoost) { Text("Lauter") }
+                        TextButton(onClick = { viewModel.sleepForMinutes(15) }) { Text("Schlaf 15") }
+                        TextButton(onClick = viewModel::sleepAtEnd) { Text("Bis Ende") }
+                        TextButton(onClick = viewModel::moreIntro) { Text("Intro +15s") }
+                        TextButton(onClick = viewModel::moreOutro) { Text("Outro +15s") }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         IconButton(onClick = viewModel::seekBack) {
-                            Text("−15", style = MaterialTheme.typography.titleMedium)
+                            Text("Zurück", style = MaterialTheme.typography.labelLarge)
                         }
                         FilledIconButton(onClick = viewModel::toggle, modifier = Modifier.size(72.dp).padding(horizontal = 12.dp)) {
                             if (playback.buffering) {
@@ -195,7 +241,7 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                             }
                         }
                         IconButton(onClick = viewModel::seekForward) {
-                            Icon(Icons.Filled.Forward30, contentDescription = "30 Sekunden vor")
+                            Text("Vor", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                     playback.error?.let { message ->
@@ -204,16 +250,69 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                     if (details.chapters.isNotEmpty()) {
                         Text("Kapitel", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
                         details.chapters.forEach { chapter ->
-                            val current = playback.positionMs >= chapter.startMs
-                            Text(
-                                "${formatClock(chapter.startMs)}  ${chapter.title}",
-                                color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
+                            val later = details.chapters.any { it.startMs > chapter.startMs && playback.positionMs >= it.startMs }
+                            val current = playback.positionMs >= chapter.startMs && !later
+                            Row(
+                                Modifier
                                     .fillMaxWidth()
                                     .clickable { viewModel.seekTo(chapter.startMs) }
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (!chapter.imageUrl.isNullOrBlank()) {
+                                    Artwork(chapter.imageUrl, chapter.title, Modifier.size(40.dp))
+                                    Spacer(Modifier.size(8.dp))
+                                }
+                                Text(
+                                    "${formatClock(chapter.startMs)}  ${chapter.title}",
+                                    color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (!chapter.url.isNullOrBlank()) {
+                                    TextButton(onClick = {
+                                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(chapter.url))) }
+                                    }) { Text("Link") }
+                                }
+                            }
+                        }
+                    }
+                    if (details.cues.isNotEmpty()) {
+                        Text("Transkript", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+                        details.cues.take(400).forEach { cue ->
+                            val active = playback.positionMs in cue.startMs until cue.endMs
+                            Text(
+                                cue.text,
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.seekTo(cue.startMs) }
+                                    .padding(vertical = 4.dp),
                             )
                         }
+                    }
+                    details.soundbites.forEach { bite ->
+                        TextButton(onClick = { viewModel.seekTo(bite.startMs) }) {
+                            Text("Soundbite ${formatClock(bite.startMs)} ${bite.title}")
+                        }
+                    }
+                    details.funding.forEach { link ->
+                        TextButton(onClick = {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link.url))) }
+                        }) { Text(link.title) }
+                    }
+                    if (details.value.isNotEmpty()) {
+                        Text("Value 4 Value", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                        details.value.forEach { recipient ->
+                            Text(
+                                listOfNotNull(recipient.name, recipient.type, recipient.address, recipient.split?.let { "$it%" }).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (details.html.contains('<')) {
+                        HtmlNotes(details.html)
+                    } else if (details.description.isNotBlank()) {
+                        Text(details.description, modifier = Modifier.padding(top = 12.dp, bottom = 32.dp))
                     }
                     details.transcripts.forEach { transcript ->
                         TextButton(onClick = {
@@ -223,13 +322,27 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                             Text("Transkript öffnen" + (transcript.language?.let { " ($it)" } ?: ""))
                         }
                     }
-                    if (details.description.isNotBlank()) {
-                        Text(details.description, modifier = Modifier.padding(top = 12.dp, bottom = 32.dp))
-                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun HtmlNotes(html: String) {
+    val color = MaterialTheme.colorScheme.onSurface
+    androidx.compose.ui.viewinterop.AndroidView(
+        modifier = Modifier.padding(top = 12.dp, bottom = 32.dp),
+        factory = { context ->
+            android.widget.TextView(context).apply {
+                movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            }
+        },
+        update = { view ->
+            view.setTextColor(color.toArgb())
+            view.text = androidx.core.text.HtmlCompat.fromHtml(html, androidx.core.text.HtmlCompat.FROM_HTML_MODE_COMPACT)
+        },
+    )
 }
 
 @Composable

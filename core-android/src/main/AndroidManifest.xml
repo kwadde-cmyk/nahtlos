@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
+        <provider
+            android:name="de.jenz.nahtlos.core.artwork.ArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
         <service
             android:name="de.jenz.nahtlos.core.playback.PodcastMediaLibraryService"
             android:exported="true"

@@ -23,7 +23,7 @@ object CoreModule {
     @Singleton
     fun database(@ApplicationContext context: Context): NahtlosDatabase =
         Room.databaseBuilder(context, NahtlosDatabase::class.java, "nahtlos.db")
-            .addMigrations(NahtlosDatabase.MIGRATION_2_3)
+            .addMigrations(NahtlosDatabase.MIGRATION_2_3, NahtlosDatabase.MIGRATION_3_4)
             .fallbackToDestructiveMigration()
             .build()
 

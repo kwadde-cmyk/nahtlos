@@ -158,6 +158,14 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 "Ältere Folgen im Feed werden übersprungen. Playlist und gespeicherte Positionen bleiben.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                "Tempo ${"%.1f".format(state.playbackSpeed)}× · zurück ${state.skipBackSec}s · vor ${state.skipForwardSec}s",
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row {
+                androidx.compose.material3.TextButton(onClick = { viewModel.nudgeSpeed(-1) }, modifier = Modifier.height(56.dp)) { Text("Langsamer") }
+                androidx.compose.material3.TextButton(onClick = { viewModel.nudgeSpeed(1) }, modifier = Modifier.height(56.dp)) { Text("Schneller") }
+            }
             EpisodeHorizon.entries.forEach { option ->
                 androidx.compose.material3.TextButton(
                     onClick = {

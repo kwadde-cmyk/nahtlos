@@ -3,6 +3,7 @@ package de.jenz.nahtlos.core.playback
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.db.EpisodeEntity
 import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.db.NahtlosDatabase
@@ -21,6 +22,7 @@ class LibraryBrowser @Inject constructor(
     private val feeds: FeedRepository,
     private val playlists: PlaylistRepository,
     private val downloads: DownloadStore,
+    private val artwork: ArtworkStore,
 ) {
     fun rootItem(): MediaItem = folder(LibraryIds.ROOT, "Nahtlos", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
 
@@ -148,7 +150,7 @@ class LibraryBrowser @Inject constructor(
                 title = podcast.title,
                 mediaType = MediaMetadata.MEDIA_TYPE_PODCAST,
                 subtitle = podcast.author,
-                artwork = podcast.imageUrl,
+                artwork = artwork.uriForBrowser(podcast.imageUrl)?.toString(),
             )
         }
     }
@@ -172,8 +174,8 @@ class LibraryBrowser @Inject constructor(
             .setIsBrowsable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
             .setDurationMs(episode.durationMs)
-        val art = episode.imageUrl ?: podcast?.imageUrl
-        if (!art.isNullOrBlank()) metadata.setArtworkUri(Uri.parse(art))
+        val art = artwork.uriForBrowser(episode.imageUrl ?: podcast?.imageUrl)
+        if (art != null) metadata.setArtworkUri(art)
         return builder.setMediaMetadata(metadata.build()).build()
     }
 
@@ -191,6 +193,7 @@ class LibraryBrowser @Inject constructor(
             .setIsPlayable(false)
             .setMediaType(mediaType)
         if (!artwork.isNullOrBlank()) metadata.setArtworkUri(Uri.parse(artwork))
+        // artwork is already a content URI when the cover is cached
         return MediaItem.Builder().setMediaId(id).setMediaMetadata(metadata.build()).build()
     }
 

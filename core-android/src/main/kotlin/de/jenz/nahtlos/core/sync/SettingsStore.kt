@@ -6,6 +6,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
+import de.jenz.nahtlos.playback.PlaybackTuning
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -22,6 +23,11 @@ data class ServerSettings(
     val downloadLimitMb: Int = 2048,
     val deletePlayedAfterHours: Int = 24,
     val episodeHorizonId: String = EpisodeHorizon.DEFAULT.id,
+    val playbackSpeed: Float = PlaybackTuning.DEFAULT_SPEED,
+    val skipBackSec: Int = PlaybackTuning.DEFAULT_SKIP_BACK_SEC,
+    val skipForwardSec: Int = PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC,
+    val skipSilence: Boolean = false,
+    val volumeBoost: Boolean = false,
 ) {
     val configured: Boolean
         get() = (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) && token.isNotBlank()
@@ -48,6 +54,11 @@ class SettingsStore @Inject constructor(
             downloadLimitMb = prefs.getInt(KEY_LIMIT, 2048).coerceIn(128, 100_000),
             deletePlayedAfterHours = prefs.getInt(KEY_DELETE_HOURS, 24).coerceIn(0, 24 * 30),
             episodeHorizonId = EpisodeHorizon.fromId(prefs.getString(KEY_HORIZON, null)).id,
+            playbackSpeed = PlaybackTuning.clampSpeed(prefs.getFloat(KEY_SPEED, PlaybackTuning.DEFAULT_SPEED)),
+            skipBackSec = PlaybackTuning.clampSkipSeconds(prefs.getInt(KEY_SKIP_BACK, PlaybackTuning.DEFAULT_SKIP_BACK_SEC)),
+            skipForwardSec = PlaybackTuning.clampSkipSeconds(prefs.getInt(KEY_SKIP_FORWARD, PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC)),
+            skipSilence = prefs.getBoolean(KEY_SILENCE, false),
+            volumeBoost = prefs.getBoolean(KEY_BOOST, false),
         )
     }
 
@@ -59,6 +70,11 @@ class SettingsStore @Inject constructor(
         downloadLimitMb: Int = read().downloadLimitMb,
         deletePlayedAfterHours: Int = read().deletePlayedAfterHours,
         episodeHorizonId: String = read().episodeHorizonId,
+        playbackSpeed: Float = read().playbackSpeed,
+        skipBackSec: Int = read().skipBackSec,
+        skipForwardSec: Int = read().skipForwardSec,
+        skipSilence: Boolean = read().skipSilence,
+        volumeBoost: Boolean = read().volumeBoost,
     ) {
         val normalized = serverUrl.trim().trimEnd('/').let { url ->
             if (url.isEmpty()) "" else EpisodeKeys.normalizeFeedUrl(url)
@@ -71,6 +87,11 @@ class SettingsStore @Inject constructor(
             .putInt(KEY_LIMIT, downloadLimitMb.coerceIn(128, 100_000))
             .putInt(KEY_DELETE_HOURS, deletePlayedAfterHours.coerceIn(0, 24 * 30))
             .putString(KEY_HORIZON, EpisodeHorizon.fromId(episodeHorizonId).id)
+            .putFloat(KEY_SPEED, PlaybackTuning.clampSpeed(playbackSpeed))
+            .putInt(KEY_SKIP_BACK, PlaybackTuning.clampSkipSeconds(skipBackSec))
+            .putInt(KEY_SKIP_FORWARD, PlaybackTuning.clampSkipSeconds(skipForwardSec))
+            .putBoolean(KEY_SILENCE, skipSilence)
+            .putBoolean(KEY_BOOST, volumeBoost)
             .apply()
     }
 
@@ -97,5 +118,10 @@ class SettingsStore @Inject constructor(
         private const val KEY_LIMIT = "downloadLimitMb"
         private const val KEY_DELETE_HOURS = "deletePlayedAfterHours"
         private const val KEY_HORIZON = "episodeHorizonId"
+        private const val KEY_SPEED = "playbackSpeed"
+        private const val KEY_SKIP_BACK = "skipBackSec"
+        private const val KEY_SKIP_FORWARD = "skipForwardSec"
+        private const val KEY_SILENCE = "skipSilence"
+        private const val KEY_BOOST = "volumeBoost"
     }
 }

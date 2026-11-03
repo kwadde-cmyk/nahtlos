@@ -8,7 +8,9 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import de.jenz.nahtlos.playback.PlaybackTuning
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,7 @@ data class PlayerSnapshot(
     val buffering: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
+    val speed: Float = PlaybackTuning.DEFAULT_SPEED,
     val error: String? = null,
 )
 
@@ -48,6 +51,8 @@ class PlayerConnection @Inject constructor(
     private var connecting = false
     private var pendingKey: String? = null
     private var ticker: Job? = null
+    private var sleepJob: Job? = null
+    private var pauseAtEnd = false
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -115,6 +120,44 @@ class PlayerConnection @Inject constructor(
         controller?.seekForward()
     }
 
+    fun nudgeSpeed(direction: Int) = command(if (direction < 0) SessionActions.SPEED_DOWN else SessionActions.SPEED_UP)
+
+    fun chapter(direction: Int) = command(if (direction < 0) SessionActions.CHAPTER_PREV else SessionActions.CHAPTER_NEXT)
+
+    fun toggleSilence() = command(SessionActions.SILENCE)
+
+    fun toggleBoost() = command(SessionActions.BOOST)
+
+    fun moreIntro() = command(SessionActions.INTRO)
+
+    fun moreOutro() = command(SessionActions.OUTRO)
+
+    /** Phone only. The car UI does not offer a sleep timer. */
+    fun sleepForMinutes(minutes: Int) {
+        sleepJob?.cancel()
+        pauseAtEnd = false
+        if (minutes <= 0) return
+        sleepJob = scope.launch {
+            delay(minutes * 60_000L)
+            controller?.pause()
+        }
+    }
+
+    fun sleepAtEnd() {
+        sleepJob?.cancel()
+        pauseAtEnd = true
+    }
+
+    fun clearSleep() {
+        sleepJob?.cancel()
+        pauseAtEnd = false
+    }
+
+    private fun command(action: String) {
+        val current = controller ?: return
+        current.sendCustomCommand(SessionCommand(action, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+    }
+
     private fun startTicker() {
         ticker?.cancel()
         ticker = scope.launch {
@@ -129,6 +172,11 @@ class PlayerConnection @Inject constructor(
         val current = controller ?: return
         val metadata: MediaMetadata? = current.mediaMetadata
         val duration = current.duration.takeIf { it > 0 } ?: 0L
+        val position = current.currentPosition.coerceAtLeast(0)
+        if (pauseAtEnd && duration > 0 && position >= duration - 1_500) {
+            pauseAtEnd = false
+            current.pause()
+        }
         _state.update {
             it.copy(
                 connected = true,
@@ -138,8 +186,9 @@ class PlayerConnection @Inject constructor(
                 artworkUri = metadata?.artworkUri?.toString(),
                 isPlaying = current.isPlaying,
                 buffering = current.playbackState == Player.STATE_BUFFERING,
-                positionMs = current.currentPosition.coerceAtLeast(0),
+                positionMs = position,
                 durationMs = duration,
+                speed = current.playbackParameters.speed,
             )
         }
     }

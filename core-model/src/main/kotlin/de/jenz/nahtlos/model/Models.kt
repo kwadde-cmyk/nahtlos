@@ -124,6 +124,23 @@ data class Person(
     val group: String? = null,
 )
 
+@Serializable
+data class FundingLink(val url: String, val title: String)
+
+@Serializable
+data class ValueRecipient(
+    val name: String? = null,
+    val type: String? = null,
+    val address: String? = null,
+    val split: Int? = null,
+)
+
+@Serializable
+data class Soundbite(val startMs: Long, val durationMs: Long? = null, val title: String = "")
+
+@Serializable
+data class TranscriptCue(val startMs: Long, val endMs: Long, val text: String)
+
 data class ParsedEpisode(
     val title: String,
     val description: String,
@@ -138,6 +155,12 @@ data class ParsedEpisode(
     val chaptersType: String?,
     val transcripts: List<TranscriptLink>,
     val persons: List<Person>,
+    val descriptionHtml: String = "",
+    val season: Int? = null,
+    val episodeNumber: String? = null,
+    val live: Boolean = false,
+    val soundbites: List<Soundbite> = emptyList(),
+    val value: List<ValueRecipient> = emptyList(),
 )
 
 data class ParsedFeed(
@@ -149,6 +172,9 @@ data class ParsedFeed(
     val author: String?,
     val persons: List<Person>,
     val episodes: List<ParsedEpisode>,
+    val funding: List<FundingLink> = emptyList(),
+    val locked: Boolean = false,
+    val value: List<ValueRecipient> = emptyList(),
 )
 
 class FeedParseException(message: String, cause: Throwable? = null) : Exception(message, cause)

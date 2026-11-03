@@ -3,13 +3,18 @@ package de.jenz.nahtlos.core.db
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.model.Chapter
 import de.jenz.nahtlos.model.EpisodeProgress
+import de.jenz.nahtlos.model.FundingLink
 import de.jenz.nahtlos.model.ParsedEpisode
 import de.jenz.nahtlos.model.ParsedFeed
 import de.jenz.nahtlos.model.Person
 import de.jenz.nahtlos.model.ProgressStatus
+import de.jenz.nahtlos.model.Soundbite
 import de.jenz.nahtlos.model.Subscription
+import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.model.TranscriptLink
+import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.NahtlosJson
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
 private val json = NahtlosJson.json
@@ -33,8 +38,30 @@ fun ParsedFeed.toPodcast(
         personsJson = json.encodeToString(persons),
         lastFetchedAt = fetchedAt,
         needsSync = needsSync,
+        fundingJson = json.encodeToString(funding),
+        valueJson = json.encodeToString(value),
+        locked = locked,
     )
 }
+
+@Serializable
+data class EpisodeExtras(
+    val descriptionHtml: String = "",
+    val season: Int? = null,
+    val episodeNumber: String? = null,
+    val live: Boolean = false,
+    val soundbites: List<Soundbite> = emptyList(),
+    val value: List<ValueRecipient> = emptyList(),
+)
+
+@Serializable
+data class PodcastPlayback(
+    val speed: Float? = null,
+    val skipSilence: Boolean? = null,
+    val boost: Boolean? = null,
+    val introSec: Int = 0,
+    val outroSec: Int = 0,
+)
 
 fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntity(
     episodeKey = EpisodeKeys.episodeKey(podcast.podcastGuid, podcast.feedUrl, guid, enclosureUrl),
@@ -51,7 +78,33 @@ fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntit
     chaptersUrl = chaptersUrl,
     transcriptsJson = json.encodeToString(transcripts),
     personsJson = json.encodeToString(persons),
+    extrasJson = json.encodeToString(
+        EpisodeExtras(
+            descriptionHtml = descriptionHtml,
+            season = season,
+            episodeNumber = episodeNumber,
+            live = live,
+            soundbites = soundbites,
+            value = value,
+        ),
+    ),
 )
+
+fun EpisodeEntity.extras(): EpisodeExtras =
+    runCatching { json.decodeFromString<EpisodeExtras>(extrasJson) }.getOrDefault(EpisodeExtras())
+
+fun PodcastEntity.funding(): List<FundingLink> =
+    runCatching { json.decodeFromString<List<FundingLink>>(fundingJson) }.getOrDefault(emptyList())
+
+fun PodcastEntity.valueRecipients(): List<ValueRecipient> =
+    runCatching { json.decodeFromString<List<ValueRecipient>>(valueJson) }.getOrDefault(emptyList())
+
+fun PodcastEntity.playback(): PodcastPlayback =
+    runCatching { json.decodeFromString<PodcastPlayback>(playbackJson) }.getOrDefault(PodcastPlayback())
+
+fun EpisodeEntity.cachedCues(): List<TranscriptCue> =
+    if (transcriptCache.isBlank()) emptyList()
+    else runCatching { json.decodeFromString<List<TranscriptCue>>(transcriptCache) }.getOrDefault(emptyList())
 
 fun EpisodeEntity.chapters(): List<Chapter> =
     runCatching { json.decodeFromString<List<Chapter>>(chaptersJson) }.getOrDefault(emptyList())

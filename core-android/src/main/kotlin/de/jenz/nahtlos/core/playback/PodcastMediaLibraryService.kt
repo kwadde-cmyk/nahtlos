@@ -15,12 +15,17 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.common.Player
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ControllerInfo
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
@@ -30,6 +35,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -43,11 +50,13 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var playbackCache: PlaybackCache
     @Inject lateinit var playlists: PlaylistRepository
     @Inject lateinit var downloads: DownloadScheduler
+    @Inject lateinit var feeds: FeedRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var player: ExoPlayer? = null
     private var librarySession: MediaLibrarySession? = null
     private var playbackSync: PlaybackSync? = null
+    private var effects: PlaybackEffects? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -63,10 +72,23 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
-            .setSeekBackIncrementMs(15_000)
-            .setSeekForwardIncrementMs(30_000)
+            .setSeekBackIncrementMs(settings.read().skipBackSec * 1000L)
+            .setSeekForwardIncrementMs(settings.read().skipForwardSec * 1000L)
             .build()
         player = exo
+        val fx = PlaybackEffects(exo, settings, feeds, scope)
+        effects = fx
+        exo.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                fx.applyForCurrentItem()
+            }
+        })
+        scope.launch {
+            while (isActive) {
+                delay(2_000)
+                fx.tickOutro()
+            }
+        }
         val syncer = PlaybackSync(exo, sync, scope) { episodeKey ->
             scope.launch {
                 val next = runCatching { playlists.onEpisodeFinished(episodeKey) }.getOrNull()
@@ -141,6 +163,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
 
     override fun onDestroy() {
         playbackSync?.flushBlocking()
+        effects?.release()
         librarySession?.release()
         librarySession = null
         player?.release()
@@ -149,7 +172,66 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private fun carButtons(): ImmutableList<CommandButton> = ImmutableList.of(
+        actionButton("Zurück", SessionActions.SKIP_BACK),
+        actionButton("Vor", SessionActions.SKIP_FORWARD),
+        actionButton("Langsamer", SessionActions.SPEED_DOWN),
+        actionButton("Schneller", SessionActions.SPEED_UP),
+        actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV),
+        actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT),
+    )
+
+    private fun actionButton(name: String, action: String): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName(name)
+            .setSessionCommand(SessionCommand(action, Bundle.EMPTY))
+            .build()
+
     private inner class LibraryCallback : MediaLibrarySession.Callback {
+        override fun onConnect(session: MediaSession, controller: ControllerInfo): MediaSession.ConnectionResult {
+            val base = super.onConnect(session, controller)
+            if (!base.isAccepted) return base
+            val commands = base.availableSessionCommands.buildUpon()
+            listOf(
+                SessionActions.SPEED_DOWN,
+                SessionActions.SPEED_UP,
+                SessionActions.SKIP_BACK,
+                SessionActions.SKIP_FORWARD,
+                SessionActions.CHAPTER_PREV,
+                SessionActions.CHAPTER_NEXT,
+                SessionActions.SILENCE,
+                SessionActions.BOOST,
+                SessionActions.INTRO,
+                SessionActions.OUTRO,
+            ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(commands.build())
+                .setAvailablePlayerCommands(base.availablePlayerCommands)
+                .setCustomLayout(carButtons())
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                SessionActions.SPEED_DOWN -> effects?.nudgeSpeed(-1)
+                SessionActions.SPEED_UP -> effects?.nudgeSpeed(1)
+                SessionActions.SKIP_BACK -> effects?.skip(forward = false)
+                SessionActions.SKIP_FORWARD -> effects?.skip(forward = true)
+                SessionActions.CHAPTER_PREV -> effects?.jumpChapter(-1)
+                SessionActions.CHAPTER_NEXT -> effects?.jumpChapter(1)
+                SessionActions.SILENCE -> effects?.toggleSilence()
+                SessionActions.BOOST -> effects?.toggleBoost()
+                SessionActions.INTRO -> effects?.bumpTrim(intro = true)
+                SessionActions.OUTRO -> effects?.bumpTrim(intro = false)
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: ControllerInfo,

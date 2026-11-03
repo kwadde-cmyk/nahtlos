@@ -62,4 +62,5 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.coroutines.android)
     implementation(libs.zxing.core)
+    implementation(libs.coil.compose)
 }
