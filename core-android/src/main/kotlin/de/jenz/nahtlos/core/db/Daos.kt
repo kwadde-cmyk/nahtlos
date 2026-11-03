@@ -202,6 +202,20 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads")
     suspend fun all(): List<DownloadEntity>
 
+    @Query(
+        """
+        SELECT d.episodeKey AS episodeKey,
+               COALESCE(e.title, d.episodeKey) AS title,
+               COALESCE(p.title, '') AS podcastTitle,
+               d.bytes AS bytes
+        FROM downloads d
+        LEFT JOIN episodes e ON e.episodeKey = d.episodeKey
+        LEFT JOIN podcasts p ON p.id = e.podcastId
+        ORDER BY d.downloadedAt DESC
+        """,
+    )
+    fun observeRows(): kotlinx.coroutines.flow.Flow<List<DownloadRow>>
+
     @Query("SELECT * FROM downloads WHERE episodeKey = :episodeKey")
     suspend fun get(episodeKey: String): DownloadEntity?
 

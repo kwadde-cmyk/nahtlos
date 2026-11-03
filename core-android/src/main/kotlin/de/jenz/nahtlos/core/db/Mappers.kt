@@ -78,7 +78,7 @@ fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntit
     chaptersUrl = chaptersUrl,
     transcriptsJson = json.encodeToString(transcripts),
     personsJson = json.encodeToString(persons),
-    extrasJson = json.encodeToString(
+    extrasJson = encodeExtras(
         EpisodeExtras(
             descriptionHtml = descriptionHtml,
             season = season,
@@ -90,8 +90,19 @@ fun ParsedEpisode.toEntity(podcast: PodcastEntity): EpisodeEntity = EpisodeEntit
     ),
 )
 
-fun EpisodeEntity.extras(): EpisodeExtras =
-    runCatching { json.decodeFromString<EpisodeExtras>(extrasJson) }.getOrDefault(EpisodeExtras())
+fun encodeExtras(extras: EpisodeExtras): String = try {
+    json.encodeToString(extras)
+} catch (error: Throwable) {
+    android.util.Log.w("Nahtlos", "EpisodeExtras nicht schreibbar", error)
+    "{}"
+}
+
+fun EpisodeEntity.extras(): EpisodeExtras = try {
+    if (extrasJson.isBlank()) EpisodeExtras() else json.decodeFromString<EpisodeExtras>(extrasJson)
+} catch (error: Throwable) {
+    android.util.Log.w("Nahtlos", "EpisodeExtras für $episodeKey nicht lesbar", error)
+    EpisodeExtras()
+}
 
 fun PodcastEntity.funding(): List<FundingLink> =
     runCatching { json.decodeFromString<List<FundingLink>>(fundingJson) }.getOrDefault(emptyList())

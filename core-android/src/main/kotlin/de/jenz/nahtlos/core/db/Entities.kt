@@ -124,6 +124,13 @@ data class ContinueRow(
     val updatedAt: Long,
 )
 
+data class DownloadRow(
+    val episodeKey: String,
+    val title: String,
+    val podcastTitle: String,
+    val bytes: Long,
+)
+
 data class EpisodeRow(
     @androidx.room.Embedded val episode: EpisodeEntity,
     val positionMs: Long?,

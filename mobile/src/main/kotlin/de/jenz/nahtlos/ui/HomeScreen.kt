@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -173,6 +174,16 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun unsubscribeMany(ids: List<String>) {
+        viewModelScope.launch {
+            ids.forEach { id ->
+                val url = feeds.getPodcast(id)?.feedUrl ?: return@forEach
+                feeds.deleteLocal(id)
+                sync.markUnsubscribed(url)
+            }
+        }
+    }
+
     suspend fun exportOpml(): String = feeds.exportOpml()
 }
 
@@ -189,12 +200,15 @@ fun HomeScreen(
     onOpenPlayer: (String?) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenPlaylist: () -> Unit,
+    onOpenDownloads: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val podcasts by viewModel.podcasts.collectAsStateWithLifecycle()
     val continueRows by viewModel.continueListening.collectAsStateWithLifecycle()
     val status by viewModel.syncStatus.collectAsStateWithLifecycle()
     val subscribe by viewModel.subscribe.collectAsStateWithLifecycle()
+    val selection = rememberSelection()
+    var confirmUnsubscribe by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -231,6 +245,14 @@ fun HomeScreen(
                 actions = {
                     IconButton(onClick = onOpenPlaylist) {
                         Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist")
+                    }
+                    IconButton(onClick = onOpenDownloads) {
+                        Icon(Icons.Filled.Download, contentDescription = "Downloads")
+                    }
+                    if (selection.active) {
+                        TextButton(onClick = { selection.all(podcasts.map { it.id }) }) { Text("Alle") }
+                        TextButton(onClick = { confirmUnsubscribe = true }, enabled = selection.keys.isNotEmpty()) { Text("Entfernen") }
+                        TextButton(onClick = { selection.clear() }) { Text("Fertig") }
                     }
                     IconButton(onClick = { importOpml.launch(arrayOf("text/*", "application/xml", "application/octet-stream")) }) {
                         Icon(Icons.Filled.Add, contentDescription = "OPML importieren")
@@ -271,7 +293,12 @@ fun HomeScreen(
                         viewModel.play(key)
                         onOpenPlayer(key)
                     },
-                    onOpenPodcast = onOpenPodcast,
+                    onOpenPodcast = { id ->
+                        if (selection.active) selection.toggle(id) else onOpenPodcast(id)
+                    },
+                    onLongPressPodcast = { selection.start(it) },
+                    selecting = selection.active,
+                    selected = selection.keys,
                     onRetryFeed = viewModel::retryFeed,
                 )
             }
@@ -279,6 +306,21 @@ fun HomeScreen(
         }
     }
 
+    if (confirmUnsubscribe) {
+        AlertDialog(
+            onDismissRequest = { confirmUnsubscribe = false },
+            title = { Text("${selection.keys.size} Abos entfernen?") },
+            text = { Text("Die Feeds verschwinden auf diesem Gerät und, sobald das Netz da ist, auch auf dem Server.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.unsubscribeMany(selection.keys.toList())
+                    selection.clear()
+                    confirmUnsubscribe = false
+                }) { Text("Entfernen") }
+            },
+            dismissButton = { TextButton(onClick = { confirmUnsubscribe = false }) { Text("Abbrechen") } },
+        )
+    }
     if (showAdd) {
         AddFeedDialog(
             state = subscribe,
@@ -373,6 +415,9 @@ private fun LibraryList(
     podcasts: List<PodcastEntity>,
     onContinue: (String) -> Unit,
     onOpenPodcast: (String) -> Unit,
+    onLongPressPodcast: (String) -> Unit,
+    selecting: Boolean,
+    selected: Set<String>,
     onRetryFeed: (String) -> Unit,
 ) {
     LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
@@ -403,15 +448,22 @@ private fun LibraryList(
             )
         }
         items(podcasts, key = { it.id }) { podcast ->
+            SelectableRow(
+                selected = podcast.id in selected,
+                selecting = selecting,
+                onClick = { onOpenPodcast(podcast.id) },
+                onLongPress = { onLongPressPodcast(podcast.id) },
+            ) {
             PodcastRow(
                 podcast,
                 onClick = { onOpenPodcast(podcast.id) },
-                onRetry = if (podcast.refreshStatus == FeedRefresh.FAILED) {
+                onRetry = if (podcast.refreshStatus == FeedRefresh.FAILED && !selecting) {
                     { onRetryFeed(podcast.id) }
                 } else {
                     null
                 },
             )
+            }
         }
     }
 }
@@ -446,7 +498,6 @@ fun PodcastRow(podcast: PodcastEntity, onClick: () -> Unit, onRetry: (() -> Unit
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

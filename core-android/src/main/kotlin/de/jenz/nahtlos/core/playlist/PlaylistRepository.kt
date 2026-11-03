@@ -65,6 +65,34 @@ class PlaylistRepository @Inject constructor(
         write(existing.copy(items = PlaylistEditor.move(existing.items, index, delta)), sync = true)
     }
 
+    suspend fun add(entries: List<PlaylistEntry>) {
+        if (entries.isEmpty()) return
+        val existing = current()
+        val known = existing.items.map { it.episodeKey }.toSet()
+        val fresh = entries.filter { it.episodeKey.isNotBlank() && it.episodeKey !in known }
+        val allowed = entries.map { it.episodeKey }.toSet()
+        write(
+            existing.copy(
+                items = existing.items + fresh,
+                excludedKeys = existing.excludedKeys.filter { it !in allowed },
+            ),
+            sync = true,
+        )
+    }
+
+    suspend fun restore(entry: PlaylistEntry, index: Int) {
+        val existing = current()
+        val items = existing.items.filterNot { it.episodeKey == entry.episodeKey }.toMutableList()
+        items.add(index.coerceIn(0, items.size), entry)
+        write(
+            existing.copy(
+                items = items,
+                excludedKeys = existing.excludedKeys.filter { it != entry.episodeKey },
+            ),
+            sync = true,
+        )
+    }
+
     suspend fun remove(episodeKey: String) {
         val existing = current()
         val excluded = (existing.excludedKeys + episodeKey).distinct()

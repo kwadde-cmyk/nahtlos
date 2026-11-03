@@ -1,0 +1,11 @@
+# kotlinx.serialization generates serializer classes next to @Serializable types.
+-keepattributes *Annotation*,InnerClasses,Signature,EnclosingMethod
+-keep,includedescriptorclasses class de.jenz.nahtlos.**$$serializer { *; }
+-keepclassmembers class de.jenz.nahtlos.** {
+    *** Companion;
+}
+-keepclasseswithmembers class de.jenz.nahtlos.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-dontnote kotlinx.serialization.**
+-keep class kotlinx.serialization.** { *; }

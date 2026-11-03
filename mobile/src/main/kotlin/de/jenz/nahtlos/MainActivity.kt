@@ -28,6 +28,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.ui.DownloadsScreen
 import de.jenz.nahtlos.ui.EpisodesScreen
 import de.jenz.nahtlos.ui.HomeScreen
 import de.jenz.nahtlos.ui.HomeViewModel
@@ -85,6 +86,7 @@ private fun AppNav() {
                     },
                     onOpenSettings = { nav.navigate("settings") },
                     onOpenPlaylist = { nav.navigate("playlist") },
+                    onOpenDownloads = { nav.navigate("downloads") },
                     viewModel = homeViewModel,
                 )
             }
@@ -106,6 +108,12 @@ private fun AppNav() {
                 }),
             ) {
                 PlayerScreen(onBack = { nav.popBackStack() })
+            }
+            composable("downloads") {
+                DownloadsScreen(
+                    onBack = { nav.popBackStack() },
+                    onPlay = { key -> nav.navigate("player?episode=${Uri.encode(key)}") },
+                )
             }
             composable("playlist") {
                 PlaylistScreen(
