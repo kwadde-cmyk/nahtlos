@@ -18,6 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -131,7 +133,7 @@ private fun CarSettings(
                     if (next == null) leave() else nav = next
                 },
                 onMediaCenter = leave,
-                showMediaCenter = nav.visible == AutoScreen.Pairing,
+                showMediaCenter = nav.visible == AutoScreen.Pairing || nav.visible == AutoScreen.Wallet,
             )
             when (nav.visible) {
                 AutoScreen.Locked -> Column(Modifier.padding(horizontal = 48.dp, vertical = 28.dp)) {
@@ -155,7 +157,7 @@ private fun CarSettings(
                         modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
                     )
                     if (server.isBlank()) {
-                        OutlinedTextField(
+                        OutlinedTextField(colors = autoFieldColors(),
                             value = url,
                             onValueChange = { url = it },
                             label = { Text("Server-URL") },
@@ -165,6 +167,14 @@ private fun CarSettings(
                         )
                     }
                     CarPairing(serverUrl = server, configured = state.configured)
+                }
+                AutoScreen.Wallet -> Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 48.dp, vertical = 12.dp),
+                ) {
+                    WalletReceive(driving = false)
                 }
                 AutoScreen.Settings -> Column(
                     Modifier
@@ -193,7 +203,7 @@ private fun CarSettings(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Server-URL") },
@@ -208,7 +218,7 @@ private fun CarSettings(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = token,
                 onValueChange = { token = it },
                 label = { Text("Token") },
@@ -219,8 +229,12 @@ private fun CarSettings(
             Spacer(Modifier.height(20.dp))
             if (Payments.enabled) {
             Text("Wallet & Zahlungen", style = MaterialTheme.typography.titleMedium)
+            Button(
+                onClick = { nav = nav.openWallet() },
+                modifier = Modifier.fillMaxWidth().height(76.dp).padding(top = 8.dp),
+            ) { Text("Wallet vom Handy holen") }
             Text(
-                "Eigener NWC-Link von Alby Hub, nur auf diesem Auto und verschlüsselt. Er geht nicht über den Server. Im Media-Center gibt es einen Boost-Knopf mit dem Standardbetrag, ohne Eingabe. Einen QR-Scanner gibt es hier nicht.",
+                "Eigener NWC-Link, verschlüsselt nur auf diesem Auto. „Wallet vom Handy holen“ nimmt eine Verbindung vom Telefon entgegen. Der Server sieht nur das Chiffrat. Abtippen bleibt der Notfall.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             wallet.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
@@ -235,7 +249,7 @@ private fun CarSettings(
                     modifier = Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp),
                 ) { Text("Wallet trennen") }
             } else {
-                OutlinedTextField(
+                OutlinedTextField(colors = autoFieldColors(),
                     value = nwc,
                     onValueChange = { nwc = it.trim() },
                     label = { Text("NWC-Link") },
@@ -248,21 +262,21 @@ private fun CarSettings(
                     modifier = Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp),
                 ) { Text(if (wallet.busy) "Verbinde …" else "Wallet verbinden") }
             }
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = sender,
                 onValueChange = { sender = it.take(40) },
                 label = { Text("Absendername") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = defaultSats,
                 onValueChange = { defaultSats = it.filter { char -> char.isDigit() }.take(7) },
                 label = { Text("Schnell-Boost in Sats") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = budget,
                 onValueChange = { budget = it.filter { char -> char.isDigit() }.take(8) },
                 label = { Text("Tagesbudget in Sats") },
@@ -321,14 +335,14 @@ private fun CarSettings(
                 Text("Downloads nur ohne Mobilfunk", modifier = Modifier.weight(1f))
                 Switch(checked = unmetered, onCheckedChange = { unmetered = it })
             }
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = limit,
                 onValueChange = { limit = it.filter { char -> char.isDigit() }.take(6) },
                 label = { Text("Speicherlimit (MB)") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            OutlinedTextField(
+            OutlinedTextField(colors = autoFieldColors(),
                 value = deleteHours,
                 onValueChange = { deleteHours = it.filter { char -> char.isDigit() }.take(4) },
                 label = { Text("Gespieltes löschen nach Stunden") },
@@ -428,21 +442,68 @@ private fun formatWhen(epochMs: Long?): String {
 
 @Composable
 private fun AutoTheme(content: @Composable () -> Unit) {
-    val dark = darkColorScheme(
-        primary = Color(0xFFF0A202),
-        onPrimary = Color(0xFF2A1C00),
-        background = Color(0xFF10120F),
-        onBackground = Color(0xFFF3F1E7),
-        surface = Color(0xFF10120F),
-        onSurface = Color(0xFFF3F1E7),
-        surfaceVariant = Color(0xFF242922),
-        onSurfaceVariant = Color(0xFFC9C6B8),
-        error = Color(0xFFFFB4A8),
+    val tone = if (isSystemInDarkTheme()) AutoPalette.dark else AutoPalette.light
+    val scheme = if (isSystemInDarkTheme()) {
+        darkColorScheme(
+            primary = Color(tone.cursor),
+            onPrimary = Color(0xFF2A1C00),
+            background = Color(tone.page),
+            onBackground = Color(tone.onPage),
+            surface = Color(tone.page),
+            onSurface = Color(tone.onPage),
+            surfaceVariant = Color(tone.field),
+            onSurfaceVariant = Color(tone.placeholder),
+            outline = Color(tone.outline),
+            error = Color(0xFFFFB4A8),
+        )
+    } else {
+        lightColorScheme(
+            primary = Color(tone.cursor),
+            onPrimary = Color(0xFFFFFFFF),
+            background = Color(tone.page),
+            onBackground = Color(tone.onPage),
+            surface = Color(tone.page),
+            onSurface = Color(tone.onPage),
+            surfaceVariant = Color(tone.field),
+            onSurfaceVariant = Color(tone.placeholder),
+            outline = Color(tone.outline),
+        )
+    }
+    MaterialTheme(colorScheme = scheme) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = scheme.background,
+            contentColor = scheme.onBackground,
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun autoFieldColors() = run {
+    val tone = if (isSystemInDarkTheme()) AutoPalette.dark else AutoPalette.light
+    val text = Color(tone.text)
+    val hint = Color(tone.placeholder)
+    val label = Color(tone.label)
+    val cursor = Color(tone.cursor)
+    val field = Color(tone.field)
+    val line = Color(tone.outline)
+    OutlinedTextFieldDefaults.colors(
+        focusedTextColor = text,
+        unfocusedTextColor = text,
+        disabledTextColor = text.copy(alpha = 0.62f),
+        cursorColor = cursor,
+        errorCursorColor = cursor,
+        focusedContainerColor = field,
+        unfocusedContainerColor = field,
+        disabledContainerColor = field,
+        focusedLabelColor = label,
+        unfocusedLabelColor = hint,
+        disabledLabelColor = hint,
+        focusedPlaceholderColor = hint,
+        unfocusedPlaceholderColor = hint,
+        disabledPlaceholderColor = hint,
+        focusedBorderColor = line,
+        unfocusedBorderColor = line,
     )
-    val light = lightColorScheme(
-        primary = Color(0xFF8A5A00),
-        background = Color(0xFFF6F3EA),
-        surface = Color(0xFFF6F3EA),
-    )
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) dark else light, content = content)
 }

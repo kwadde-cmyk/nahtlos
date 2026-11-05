@@ -87,6 +87,8 @@ class WalletStore @Inject constructor(@ApplicationContext context: Context) {
 
     private val prefs: SharedPreferences by lazy { openEncrypted() }
 
+    fun readRaw(): String? = synchronized(lock) { prefs.getString(KEY_URI, null) }
+
     fun readUri(): NwcUri? = synchronized(lock) {
         val raw = prefs.getString(KEY_URI, null) ?: return null
         runCatching { NwcUri.parse(raw) }.getOrNull()

@@ -21,6 +21,17 @@ class AutoScreensTest {
     }
 
     @Test
+    fun walletScreenReturnsToSettingsAndStaysClosedWhileDriving() {
+        val wallet = AutoNav.initial(openPairing = false).openWallet()
+        assertEquals(AutoScreen.Wallet, wallet.visible)
+        assertEquals(AutoScreen.Settings, wallet.back()?.visible)
+        val locked = wallet.withDriving(true)
+        assertEquals(AutoScreen.Locked, locked.visible)
+        assertEquals(AutoScreen.Locked, locked.openWallet().visible)
+        assertNull(locked.back())
+    }
+
+    @Test
     fun drivingHidesPairingAndBackLeavesWithoutOpeningIt() {
         val locked = AutoNav.initial(openPairing = true).withDriving(true)
         assertEquals(AutoScreen.Locked, locked.visible)

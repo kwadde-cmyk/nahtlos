@@ -108,6 +108,7 @@ fun Application.module(
 
         route("/v1") {
             deviceRoutes(database, clock, guard, random)
+            walletRelayRoutes(database, clock, guard)
             get("/subscriptions") { call.respond(database.listSubscriptions()) }
 
             put("/subscriptions") {

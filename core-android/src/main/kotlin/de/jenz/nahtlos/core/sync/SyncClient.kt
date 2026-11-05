@@ -14,6 +14,10 @@ import de.jenz.nahtlos.model.ProgressBatchRequest
 import de.jenz.nahtlos.model.ProgressBatchResponse
 import de.jenz.nahtlos.model.ProgressWriteResponse
 import de.jenz.nahtlos.model.Subscription
+import de.jenz.nahtlos.model.WalletCipherRequest
+import de.jenz.nahtlos.model.WalletOpenRequest
+import de.jenz.nahtlos.model.WalletOpenResponse
+import de.jenz.nahtlos.model.WalletPollResponse
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
@@ -139,6 +143,19 @@ class SyncClient @Inject constructor(
     suspend fun putOpml(settings: ServerSettings, opml: String): List<Subscription> {
         val result = authed(settings, "/v1/subscriptions/opml", "PUT", json.encodeToString(OpmlUpload(opml)))
         return json.decodeFromString(result)
+    }
+
+    suspend fun openWalletRelay(settings: ServerSettings, sessionId: String): WalletOpenResponse =
+        json.decodeFromString(authed(settings, "/v1/wallet-relay/open", "POST", json.encodeToString(WalletOpenRequest(sessionId))))
+
+    suspend fun putWalletCipher(settings: ServerSettings, sessionId: String, ciphertext: String) {
+        val id = URLEncoder.encode(sessionId, Charsets.UTF_8.name())
+        authed(settings, "/v1/wallet-relay/$id/cipher", "POST", json.encodeToString(WalletCipherRequest(ciphertext)))
+    }
+
+    suspend fun pollWalletRelay(settings: ServerSettings, sessionId: String): WalletPollResponse {
+        val id = URLEncoder.encode(sessionId, Charsets.UTF_8.name())
+        return json.decodeFromString(authed(settings, "/v1/wallet-relay/$id", "GET", null))
     }
 
     private suspend fun authed(settings: ServerSettings, path: String, method: String, body: String?): String {

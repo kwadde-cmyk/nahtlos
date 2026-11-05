@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.db.playback
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
@@ -23,6 +24,7 @@ class PlaybackEffects(
     private val player: ExoPlayer,
     private val settings: SettingsStore,
     private val feeds: FeedRepository,
+    private val artwork: ArtworkStore,
     private val scope: CoroutineScope,
 ) {
     private var boost: LoudnessEnhancer? = null
@@ -133,12 +135,20 @@ class PlaybackEffects(
     }
 
     private fun showChapter(title: String, imageUrl: String?) {
+        applyChapter(title, artwork.contentUri(imageUrl) ?: imageUrl?.let(Uri::parse))
+        if (imageUrl.isNullOrBlank() || artwork.contentUri(imageUrl) != null) return
+        scope.launch {
+            artwork.ensure(imageUrl)
+            val local = artwork.contentUri(imageUrl) ?: return@launch
+            withContext(Dispatchers.Main) { applyChapter(title, local) }
+        }
+    }
+
+    private fun applyChapter(title: String, art: Uri?) {
         val item = player.currentMediaItem ?: return
         val metadata = item.mediaMetadata.buildUpon().setSubtitle(title)
-        if (!imageUrl.isNullOrBlank()) metadata.setArtworkUri(Uri.parse(imageUrl))
-        val updated = item.buildUpon()
-            .setMediaMetadata(metadata.build())
-            .build()
+        if (art != null) metadata.setArtworkUri(art)
+        val updated = item.buildUpon().setMediaMetadata(metadata.build()).build()
         val index = player.currentMediaItemIndex
         val position = player.currentPosition
         val play = player.playWhenReady

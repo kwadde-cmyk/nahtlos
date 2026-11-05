@@ -177,7 +177,7 @@ fun CarPairing(
     }
 }
 
-private fun pairingQr(contents: String, size: Int = 640): androidx.compose.ui.graphics.ImageBitmap {
+internal fun pairingQr(contents: String, size: Int = 640): androidx.compose.ui.graphics.ImageBitmap {
     val matrix = QRCodeWriter().encode(contents, BarcodeFormat.QR_CODE, size, size)
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
     for (x in 0 until size) {

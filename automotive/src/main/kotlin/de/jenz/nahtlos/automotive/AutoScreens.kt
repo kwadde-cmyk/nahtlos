@@ -14,11 +14,13 @@ data class AutoNav(
 
     fun openPairing(): AutoNav = if (driving) this else copy(parked = AutoScreen.Pairing)
 
+    fun openWallet(): AutoNav = if (driving) this else copy(parked = AutoScreen.Wallet)
+
     fun withDriving(nowDriving: Boolean): AutoNav = copy(driving = nowDriving)
 
     fun back(): AutoNav? = when {
         driving -> null
-        parked == AutoScreen.Pairing -> copy(parked = AutoScreen.Settings)
+        parked == AutoScreen.Pairing || parked == AutoScreen.Wallet -> copy(parked = AutoScreen.Settings)
         else -> null
     }
 
@@ -28,4 +30,4 @@ data class AutoNav(
     }
 }
 
-enum class AutoScreen { Settings, Pairing, Locked }
+enum class AutoScreen { Settings, Pairing, Wallet, Locked }

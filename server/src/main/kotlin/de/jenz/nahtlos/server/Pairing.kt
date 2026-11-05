@@ -8,7 +8,13 @@ import de.jenz.nahtlos.model.PairApproveRequest
 import de.jenz.nahtlos.model.PairApproveResponse
 import de.jenz.nahtlos.model.PairPollResponse
 import de.jenz.nahtlos.model.PairStartResponse
+import de.jenz.nahtlos.model.WalletCipherRequest
+import de.jenz.nahtlos.model.WalletOpenRequest
+import de.jenz.nahtlos.model.WalletOpenResponse
+import de.jenz.nahtlos.model.WalletPollResponse
 import de.jenz.nahtlos.sync.PairingCodes
+import de.jenz.nahtlos.wallet.WalletRelay
+import java.util.Base64
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
@@ -40,6 +46,7 @@ class PairingGuard(private val clock: () -> Long) {
     private val starts = ArrayDeque<Hit>()
     private val failures = ArrayDeque<Hit>()
     private val polls = ArrayDeque<Hit>()
+    private val wallet = ArrayDeque<Hit>()
 
     fun allowStart(ip: String) {
         prune(starts)
@@ -68,6 +75,14 @@ class PairingGuard(private val clock: () -> Long) {
         polls.addLast(Hit(ip, clock()))
     }
 
+    fun allowWallet(ip: String) {
+        prune(wallet)
+        if (wallet.count { it.ip == ip } >= MAX_WALLET) {
+            throw RateLimitedException("Zu viele Wallet-Sendungen. Ein paar Minuten warten.")
+        }
+        wallet.addLast(Hit(ip, clock()))
+    }
+
     private fun prune(hits: ArrayDeque<Hit>) {
         val cutoff = clock() - WINDOW_MS
         while (hits.isNotEmpty() && hits.first().at < cutoff) hits.removeFirst()
@@ -80,6 +95,7 @@ class PairingGuard(private val clock: () -> Long) {
         const val MAX_STARTS = 8
         const val MAX_FAILURES = 5
         const val MAX_POLLS = 240
+        const val MAX_WALLET = 400
     }
 }
 
@@ -194,6 +210,94 @@ fun Route.deviceRoutes(database: SyncDatabase, clock: () -> Long, guard: Pairing
         call.respond(HttpStatusCode.NoContent)
     }
 }
+
+fun Route.walletRelayRoutes(database: SyncDatabase, clock: () -> Long, guard: PairingGuard) {
+    route("/wallet-relay") {
+        post("/open") {
+            guard.allowWallet(clientIp())
+            val auth = call.attributes.getOrNull(NahtlosAuthKey)
+            val device = auth as? AuthKind.Device
+                ?: throw IllegalArgumentException("Nur ein gekoppeltes Gerät kann eine Sendung öffnen")
+            val body = call.receive<WalletOpenRequest>()
+            val sessionId = body.sessionId.trim()
+            if (!SESSION_ID.matches(sessionId)) throw IllegalArgumentException("Sitzung ungültig")
+            val now = clock()
+            database.purgeWalletRelay(now)
+            try {
+                database.openWalletRelay(sessionId, device.id, now, now + WalletRelay.TTL_SECONDS * 1000L)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Diese Sitzung gibt es schon")
+            }
+            call.respond(WalletOpenResponse(sessionId = sessionId, expiresIn = WalletRelay.TTL_SECONDS))
+        }
+
+        post("/{id}/cipher") {
+            guard.allowWallet(clientIp())
+            val auth = call.attributes.getOrNull(NahtlosAuthKey)
+            val sender = when (auth) {
+                is AuthKind.Device -> auth.id
+                AuthKind.Admin -> null
+                else -> throw IllegalArgumentException("Token fehlt oder ist falsch")
+            }
+            val sessionId = call.parameters["id"]?.trim().orEmpty()
+            if (!SESSION_ID.matches(sessionId)) throw IllegalArgumentException("Sitzung ungültig")
+            val body = call.receive<WalletCipherRequest>()
+            val cipher = body.ciphertext.trim()
+            if (!acceptableCipher(cipher)) throw IllegalArgumentException("Sendung abgelehnt")
+            val stored = database.storeWalletCipher(sessionId, sender, cipher, clock())
+            if (!stored) throw IllegalArgumentException("Sendung abgelehnt oder abgelaufen")
+            call.respond(mapOf("status" to "stored"))
+        }
+
+        get("/{id}") {
+            guard.allowWallet(clientIp())
+            val auth = call.attributes.getOrNull(NahtlosAuthKey)
+            val device = auth as? AuthKind.Device
+            if (device == null) {
+                call.respond(HttpStatusCode.Forbidden, ErrorBody("Nur das Auto kann die Sendung abholen"))
+                return@get
+            }
+            val sessionId = call.parameters["id"]?.trim().orEmpty()
+            val now = clock()
+            val taken = database.takeWalletCipher(sessionId, device.id, now)
+            if (taken.status == WalletTake.FORBIDDEN) {
+                call.respond(HttpStatusCode.Forbidden, ErrorBody("Nur das Auto kann die Sendung abholen"))
+                return@get
+            }
+            val expiresIn = if (taken.expiresAt > now) ((taken.expiresAt - now) / 1000L).toInt() else 0
+            call.respond(
+                WalletPollResponse(
+                    status = when (taken.status) {
+                        WalletTake.READY -> WalletPollResponse.READY
+                        WalletTake.PENDING -> WalletPollResponse.PENDING
+                        WalletTake.EXPIRED -> WalletPollResponse.EXPIRED
+                        else -> WalletPollResponse.GONE
+                    },
+                    expiresIn = expiresIn,
+                    ciphertext = taken.ciphertext,
+                    senderName = taken.senderDeviceId?.let { database.deviceName(it) },
+                ),
+            )
+        }
+    }
+}
+
+private val SESSION_ID = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+private fun acceptableCipher(cipher: String): Boolean {
+    if (cipher.length !in 40..4000) return false
+    if (cipher.contains("nostr+walletconnect") || cipher.contains("secret=")) return false
+    if (!cipher.matches(BASE64)) return false
+    val decoded = try {
+        Base64.getDecoder().decode(cipher)
+    } catch (_: IllegalArgumentException) {
+        return false
+    }
+    if (decoded.size !in 48..3000) return false
+    return !String(decoded, Charsets.ISO_8859_1).contains("nostr+walletconnect")
+}
+
+private val BASE64 = Regex("^[A-Za-z0-9+/]+=*$")
 
 private fun DeviceRow.toSummary() = DeviceSummary(
     id = id,

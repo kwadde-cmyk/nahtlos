@@ -9,3 +9,6 @@
 }
 -dontnote kotlinx.serialization.**
 -keep class kotlinx.serialization.** { *; }
+-keep class org.bouncycastle.crypto.hpke.** { *; }
+-keep class org.bouncycastle.crypto.agreement.** { *; }
+-dontwarn org.bouncycastle.**
