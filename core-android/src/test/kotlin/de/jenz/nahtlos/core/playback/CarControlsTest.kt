@@ -1,15 +1,53 @@
 package de.jenz.nahtlos.core.playback
 
+import androidx.media3.session.CommandButton
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CarControlsTest {
     @Test
-    fun chapterButtonsAreInTheFirstFourSlotsWithoutAWallet() {
-        val names = CarControls.names(payments = false)
-        assertTrue(names.indexOf("Kapitel zurück") in 0..3)
-        assertTrue(names.indexOf("Nächstes Kapitel") in 0..3)
-        assertTrue("Boost" !in names)
-        assertTrue(names.indexOf("Zurück") < names.indexOf("Kapitel zurück"))
+    fun boostSitsBesidePlayAndAheadOfChapterAndSpeed() {
+        val buttons = CarControls.buttons(payments = true, automotive = true)
+        val boost = buttons.first()
+        assertEquals("Boost", boost.name)
+        assertEquals(SessionActions.QUICK_BOOST, boost.action)
+        assertEquals(CommandButton.SLOT_FORWARD_SECONDARY, boost.slots.first())
+        assertTrue(CommandButton.SLOT_OVERFLOW in boost.slots)
+        assertTrue(boost.iconRes != 0)
+        assertTrue(buttons.indexOfFirst { it.name == "Boost" } < buttons.indexOfFirst { it.name == "Kapitel zurück" })
+        assertTrue(buttons.indexOfFirst { it.name == "Boost" } < buttons.indexOfFirst { it.name == "Langsamer" })
+        buttons.drop(1).forEach { button ->
+            assertEquals(listOf(CommandButton.SLOT_OVERFLOW), button.slots.toList())
+            assertFalse(CommandButton.SLOT_BACK in button.slots)
+            assertFalse(CommandButton.SLOT_FORWARD in button.slots)
+        }
+    }
+
+    @Test
+    fun withoutPaymentsTheCarStillShowsChaptersButNoBoost() {
+        val names = CarControls.buttons(payments = false, automotive = true).map { it.name }
+        assertFalse(names.contains("Boost"))
+        assertEquals("Kapitel zurück", names.first())
+    }
+
+    @Test
+    fun phoneLayoutStaysIndependentOfTheCarSlot() {
+        val names = CarControls.buttons(payments = true, automotive = false).map { it.name }
+        assertEquals("Zurück", names.first())
+        assertTrue(names.indexOf("Boost") > names.indexOf("Vor"))
+    }
+
+    @Test
+    fun missingWalletOrValueGetsAVisibleAnswer() {
+        assertEquals(
+            "Kein Wallet auf diesem Auto. Im Stand unter Einstellungen holen.",
+            CarControls.boostNotice("Kein Wallet verbunden."),
+        )
+        assertEquals(
+            "Dieser Feed hat keine Empfänger. Nichts gesendet.",
+            CarControls.boostNotice("Keine zahlbaren Empfänger."),
+        )
     }
 }
