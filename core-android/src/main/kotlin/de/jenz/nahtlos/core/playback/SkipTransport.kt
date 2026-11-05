@@ -3,6 +3,7 @@ package de.jenz.nahtlos.core.playback
 import android.view.KeyEvent
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
+import java.lang.reflect.Proxy
 import java.util.IdentityHashMap
 
 /**
@@ -43,11 +44,24 @@ class SkipTransport(
     override fun getAvailableCommands(): Player.Commands = withTransport(super.getAvailableCommands())
 
     override fun addListener(listener: Player.Listener) {
-        val wrapped = object : Player.Listener by listener {
-            override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
-                listener.onAvailableCommandsChanged(withTransport(availableCommands))
+        // Kein Kotlin-„by“: das erzeugt keine Weiterleitung für die Default-Methoden
+        // von Player.Listener. Dann kommen Play, Pause und der Titel nicht in der
+        // MediaSession an und die System-Medienkarte bleibt leer.
+        val wrapped = Proxy.newProxyInstance(
+            Player.Listener::class.java.classLoader,
+            arrayOf(Player.Listener::class.java),
+        ) { proxy, method, args ->
+            when (method.name) {
+                "equals" -> proxy === args?.getOrNull(0)
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "SkipTransportListener"
+                "onAvailableCommandsChanged" -> {
+                    listener.onAvailableCommandsChanged(withTransport(args!![0] as Player.Commands))
+                    null
+                }
+                else -> if (args == null) method.invoke(listener) else method.invoke(listener, *args)
             }
-        }
+        } as Player.Listener
         listeners[listener] = wrapped
         super.addListener(wrapped)
     }
