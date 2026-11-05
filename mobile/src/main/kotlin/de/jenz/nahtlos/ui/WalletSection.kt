@@ -24,7 +24,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import de.jenz.nahtlos.core.wallet.WalletHandoffViewModel
 import de.jenz.nahtlos.core.wallet.WalletViewModel
+import de.jenz.nahtlos.wallet.WalletRelay
 import de.jenz.nahtlos.core.wallet.formatSats
 import java.time.Instant
 import java.time.ZoneId
@@ -101,6 +103,7 @@ fun WalletSection(viewModel: WalletViewModel = hiltViewModel(), onNotice: (Strin
             ) { Text("Trennen") }
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+        WalletHandoff(stored = state.connected)
         OutlinedTextField(
             value = sender,
             onValueChange = { sender = it.take(40) },
@@ -152,6 +155,64 @@ fun WalletSection(viewModel: WalletViewModel = hiltViewModel(), onNotice: (Strin
                     TextButton(onClick = { viewModel.retry(payment.id) }, enabled = !state.busy) { Text("Fehlende erneut") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WalletHandoff(stored: Boolean, viewModel: WalletHandoffViewModel = hiltViewModel()) {
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    var other by remember { mutableStateOf("") }
+    var qr by remember { mutableStateOf("") }
+    var scan by remember { mutableStateOf(false) }
+    var camera by remember { mutableStateOf(false) }
+    val offer = remember(qr) { WalletRelay.parseOffer(qr) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        camera = granted
+        if (granted) scan = true
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Text("Ans Auto senden", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Im Auto, im Stand, „Wallet vom Handy holen“ öffnen. Den QR dort scannen und den Code vergleichen. Dieselbe Verbindung teilt Guthaben und Tagesbudget. Für eine eigene Auto-Wallet hier eine zweite Alby-Verbindung einfügen oder ihren QR scannen, nicht den vom Auto.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        OutlinedTextField(
+            value = other,
+            onValueChange = { other = it.trim() },
+            label = { Text(if (stored) "Andere Verbindung, sonst die hier gespeicherte" else "NWC-Link fürs Auto") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+        if (scan && camera) {
+            QrScanner(onResult = { value ->
+                val text = value.trim()
+                if (text.startsWith("nahtlos://wallet")) {
+                    qr = text
+                    scan = false
+                } else if (text.startsWith("nostr+walletconnect://")) {
+                    other = text
+                    scan = false
+                }
+            })
+        }
+        TextButton(onClick = {
+            if (camera) scan = !scan else permission.launch(Manifest.permission.CAMERA)
+        }) { Text(if (scan) "Scanner schließen" else "QR scannen") }
+        if (offer != null) {
+            Text(
+                "Code ${offer.fingerprint}. Nur senden, wenn das Auto denselben zeigt.",
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        Button(
+            onClick = { viewModel.send(qr, other, confirmed = offer != null) },
+            enabled = offer != null && (stored || other.startsWith("nostr+walletconnect://")),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Codes stimmen überein, senden") }
+        if (message.isNotBlank()) {
+            Text(message, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }

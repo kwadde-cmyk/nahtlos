@@ -74,6 +74,18 @@ class SyncDatabase(path: String) : AutoCloseable {
                 )
                 statement.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS wallet_relay (
+                      session_id TEXT PRIMARY KEY,
+                      recipient_device_id TEXT NOT NULL,
+                      sender_device_id TEXT,
+                      ciphertext TEXT,
+                      created_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS progress (
                       episode_key TEXT PRIMARY KEY,
                       podcast_guid TEXT,
@@ -422,6 +434,102 @@ class SyncDatabase(path: String) : AutoCloseable {
         row
     }
 
+    fun purgeWalletRelay(now: Long) = synchronized(lock) {
+        connection.prepareStatement("DELETE FROM wallet_relay WHERE expires_at < ?").use { statement ->
+            statement.setLong(1, now)
+            statement.executeUpdate()
+        }
+    }
+
+    fun openWalletRelay(sessionId: String, recipientDeviceId: String, now: Long, expiresAt: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            "INSERT INTO wallet_relay(session_id, recipient_device_id, sender_device_id, ciphertext, created_at, expires_at) VALUES (?, ?, NULL, NULL, ?, ?)",
+        ).use { statement ->
+            statement.setString(1, sessionId)
+            statement.setString(2, recipientDeviceId)
+            statement.setLong(3, now)
+            statement.setLong(4, expiresAt)
+            statement.executeUpdate()
+        }
+    }
+
+    /** Stores ciphertext once. The plaintext never has a column. */
+    fun storeWalletCipher(sessionId: String, senderDeviceId: String?, ciphertext: String, now: Long): Boolean = synchronized(lock) {
+        val row = walletRow(sessionId) ?: return false
+        if (row.expiresAt < now || row.ciphertext != null) return false
+        if (senderDeviceId != null && senderDeviceId == row.recipientDeviceId) return false
+        connection.prepareStatement(
+            "UPDATE wallet_relay SET ciphertext = ?, sender_device_id = ? WHERE session_id = ? AND ciphertext IS NULL",
+        ).use { statement ->
+            statement.setString(1, ciphertext)
+            statement.setString(2, senderDeviceId)
+            statement.setString(3, sessionId)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    fun takeWalletCipher(sessionId: String, recipientDeviceId: String, now: Long): WalletTake = synchronized(lock) {
+        val row = walletRow(sessionId) ?: return WalletTake(WalletTake.GONE, null, null, 0)
+        if (row.recipientDeviceId != recipientDeviceId) return WalletTake(WalletTake.FORBIDDEN, null, null, row.expiresAt)
+        if (row.expiresAt < now) {
+            deleteWallet(sessionId)
+            return WalletTake(WalletTake.EXPIRED, null, null, row.expiresAt)
+        }
+        if (row.ciphertext == null) return WalletTake(WalletTake.PENDING, null, null, row.expiresAt)
+        deleteWallet(sessionId)
+        WalletTake(WalletTake.READY, row.ciphertext, row.senderDeviceId, row.expiresAt)
+    }
+
+    fun deviceName(id: String): String? = synchronized(lock) {
+        connection.prepareStatement("SELECT name FROM devices WHERE id = ?").use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.getString(1) else null }
+        }
+    }
+
+    /** Test helper. Concatenates stored relay rows so tests can see that the secret is absent. */
+    fun walletSnapshot(): String = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT session_id, recipient_device_id, IFNULL(sender_device_id, ''), IFNULL(ciphertext, '') FROM wallet_relay",
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                val text = StringBuilder()
+                while (rows.next()) {
+                    text.append(rows.getString(1)).append('|')
+                    text.append(rows.getString(2)).append('|')
+                    text.append(rows.getString(3)).append('|')
+                    text.append(rows.getString(4)).append('\n')
+                }
+                text.toString()
+            }
+        }
+    }
+
+    private fun walletRow(sessionId: String): WalletRow? {
+        return connection.prepareStatement(
+            "SELECT session_id, recipient_device_id, sender_device_id, ciphertext, expires_at FROM wallet_relay WHERE session_id = ?",
+        ).use { statement ->
+            statement.setString(1, sessionId)
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                WalletRow(
+                    sessionId = rows.getString(1),
+                    recipientDeviceId = rows.getString(2),
+                    senderDeviceId = rows.getString(3),
+                    ciphertext = rows.getString(4),
+                    expiresAt = rows.getLong(5),
+                )
+            }
+        }
+    }
+
+    private fun deleteWallet(sessionId: String) {
+        connection.prepareStatement("DELETE FROM wallet_relay WHERE session_id = ?").use { statement ->
+            statement.setString(1, sessionId)
+            statement.executeUpdate()
+        }
+    }
+
     override fun close() {
         synchronized(lock) { connection.close() }
     }
@@ -456,6 +564,29 @@ data class DeviceRow(
     val createdAt: Long,
     val lastSeenAt: Long?,
     val revoked: Boolean,
+)
+
+data class WalletTake(
+    val status: String,
+    val ciphertext: String?,
+    val senderDeviceId: String?,
+    val expiresAt: Long,
+) {
+    companion object {
+        const val PENDING = "pending"
+        const val READY = "ready"
+        const val EXPIRED = "expired"
+        const val GONE = "gone"
+        const val FORBIDDEN = "forbidden"
+    }
+}
+
+private data class WalletRow(
+    val sessionId: String,
+    val recipientDeviceId: String,
+    val senderDeviceId: String?,
+    val ciphertext: String?,
+    val expiresAt: Long,
 )
 
 data class PairingRow(

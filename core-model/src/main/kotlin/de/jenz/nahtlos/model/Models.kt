@@ -287,3 +287,27 @@ data class BootstrapResponse(
     val name: String,
     val token: String,
 )
+
+@Serializable
+data class WalletOpenRequest(val sessionId: String)
+
+@Serializable
+data class WalletOpenResponse(val sessionId: String, val expiresIn: Int)
+
+@Serializable
+data class WalletCipherRequest(val ciphertext: String)
+
+@Serializable
+data class WalletPollResponse(
+    val status: String,
+    val expiresIn: Int? = null,
+    val ciphertext: String? = null,
+    val senderName: String? = null,
+) {
+    companion object {
+        const val PENDING = "pending"
+        const val READY = "ready"
+        const val EXPIRED = "expired"
+        const val GONE = "gone"
+    }
+}

@@ -26,6 +26,7 @@ camerax = "1.4.1"
 concurrent = "1.2.0"
 reorderable = "2.5.1"
 security = "1.1.0-alpha06"
+bouncycastle = "1.78.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -59,6 +60,7 @@ concurrent-futures = { module = "androidx.concurrent:concurrent-futures", versio
 guava = { module = "com.google.guava:guava", version = "33.3.1-android" }
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 androidx-security = { module = "androidx.security:security-crypto", version.ref = "security" }
+bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }

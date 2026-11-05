@@ -6,6 +6,7 @@ import androidx.media3.common.MediaMetadata
 import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.db.EpisodeEntity
 import de.jenz.nahtlos.core.db.PodcastEntity
+import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadStore
@@ -184,11 +185,21 @@ class LibraryBrowser @Inject constructor(
             .setMediaId(episode.episodeKey)
             .setUri(localOrRemote(episode.episodeKey, episode.enclosureUrl))
             .setMimeType(episode.mimeType ?: "audio/mpeg")
+        val extras = episode.extras()
+        val title = if (extras.live) "Live: ${episode.title}" else episode.title
+        val chapterHint = episode.chaptersJson != "[]" || !episode.chaptersUrl.isNullOrBlank()
+        val shownSubtitle = buildString {
+            if (!subtitle.isNullOrBlank()) append(subtitle)
+            if (chapterHint) {
+                if (isNotEmpty()) append(" · ")
+                append("Kapitel")
+            }
+        }.ifBlank { null }
         val metadata = MediaMetadata.Builder()
-            .setTitle(episode.title)
+            .setTitle(title)
             .setArtist(podcast?.title)
             .setAlbumTitle(podcast?.title)
-            .setSubtitle(subtitle)
+            .setSubtitle(shownSubtitle)
             .setIsPlayable(playable)
             .setIsBrowsable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)

@@ -16,6 +16,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 dependencies {
+    api(libs.bouncycastle)
     implementation(libs.serialization.json)
     compileOnly(libs.xmlpull)
     testImplementation(libs.kxml2)

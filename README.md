@@ -86,6 +86,8 @@ Am Telefon sind die Aktionen beschriftet. Oben bleiben Playlist, Downloads und E
 
 `automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weitermachen, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`.
 
+Die Wallet-Übergabe ans Auto ist eine eigene, kurzlebige Tabelle `wallet_relay`. Der Server speichert nur das HPKE-Chiffrat, nie den NWC-Link. Die Tabelle entsteht beim Start an der bestehenden SQLite-Datei, eine eigene Migration ist nicht nötig. Hinter dem Nginx Proxy Manager reicht ein neues Server-Image und ein Neustart des Containers. Handy und Auto müssen danach dieselbe Fassung sprechen.
+
 Ohne Server-URL und Token liefert die Automotive-App einen leeren Baum mit der Aktion „Handy koppeln“. Der Einrichtungs-Screen ist eine normale Activity ohne `distractionOptimized` und damit nur im Parkzustand benutzbar. Oben sitzt „Zurück“ und führt ins Mediencenter, auch ohne Hardware-Taste; die System-Zurück-Taste macht dasselbe. „Handy per QR-Code koppeln“ öffnet die vorhandene Kopplung: QR-Code und Kurzcode, das Handy scannt oder tippt den Code. Die Server-Adresse steckt im QR-Code (`nahtlos://pair?server=...&code=...`). Ist im Auto noch keine Adresse bekannt, gilt der Build-Wert `NAHTLOS_DEFAULT_SERVER` (Gradle-Property oder Umgebungsvariable, sonst leer); notfalls wird nur die Adresse eingetippt. Während der Fahrt bleibt der Bildschirm bei „Bitte im Stand einrichten“, nur mit Zurück.
 
 ## Sync-Server

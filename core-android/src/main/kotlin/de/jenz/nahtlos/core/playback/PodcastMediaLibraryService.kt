@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.AppLog
+import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.wallet.BoostService
@@ -56,6 +57,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var playlists: PlaylistRepository
     @Inject lateinit var downloads: DownloadScheduler
     @Inject lateinit var feeds: FeedRepository
+    @Inject lateinit var artwork: ArtworkStore
     @Inject lateinit var boosts: BoostService
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -86,7 +88,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             .setSeekForwardIncrementMs(settings.read().skipForwardSec * 1000L)
             .build()
         player = exo
-        val fx = PlaybackEffects(exo, settings, feeds, scope)
+        val fx = PlaybackEffects(exo, settings, feeds, artwork, scope)
         effects = fx
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
@@ -238,13 +240,13 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         val buttons = ImmutableList.builder<CommandButton>()
         buttons.add(actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK))
         buttons.add(actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD))
-        buttons.add(actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS))
-        buttons.add(actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS))
         buttons.add(actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS))
         buttons.add(actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT))
         if (Payments.enabled) {
             buttons.add(actionButton("Boost", SessionActions.QUICK_BOOST, CommandButton.ICON_HEART_FILLED))
         }
+        buttons.add(actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS))
+        buttons.add(actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS))
         return buttons.build()
     }
 
