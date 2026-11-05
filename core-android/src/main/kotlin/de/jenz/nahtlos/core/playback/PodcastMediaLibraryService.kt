@@ -7,7 +7,6 @@ import android.net.NetworkCapabilities
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -157,7 +156,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             )
         }
         if (librarySession == null) {
-            librarySession = MediaLibrarySession.Builder(this, SteeringPlayer(exo), LibraryCallback())
+            librarySession = MediaLibrarySession.Builder(this, skipTransport(exo), LibraryCallback())
                 .setId("nahtlos")
                 .apply { if (sessionActivity != null) setSessionActivity(sessionActivity) }
                 .build()
@@ -465,30 +464,13 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         return items.subList(from.toInt(), to)
     }
 
+    private fun skipTransport(player: Player) = SkipTransport(player) { forward ->
+        val stored = settings.read()
+        val seconds = if (forward) stored.skipForwardSec else stored.skipBackSec
+        seconds.coerceAtLeast(0) * 1000L
+    }
+
     companion object {
         private const val AUTOMOTIVE = "android.hardware.type.automotive"
     }
-}
-
-/**
- * Lenkrad und Headset-Tasten „vor“/„zurück“ springen um den eingestellten Skip,
- * nicht zur nächsten Mediendatei. Play und Pause bleiben die Player-Befehle.
- */
-@UnstableApi
-private class SteeringPlayer(player: Player) : ForwardingPlayer(player) {
-    override fun seekToNext() = seekForward()
-
-    override fun seekToNextMediaItem() = seekForward()
-
-    override fun seekToPrevious() = seekBack()
-
-    override fun seekToPreviousMediaItem() = seekBack()
-
-    override fun getAvailableCommands(): Player.Commands =
-        super.getAvailableCommands().buildUpon()
-            .add(Player.COMMAND_SEEK_TO_NEXT)
-            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            .add(Player.COMMAND_SEEK_TO_PREVIOUS)
-            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            .build()
 }

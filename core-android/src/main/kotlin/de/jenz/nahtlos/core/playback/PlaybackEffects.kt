@@ -42,7 +42,7 @@ class PlaybackEffects(
                 player.playbackParameters = player.playbackParameters.withSpeed(speed)
                 player.skipSilenceEnabled = silence
                 setBoost(louder)
-                // Seek increments are fixed when the player is built; custom actions use the live setting.
+                // Kopfhörer und Lenkrad lesen den Skip bei jedem Tastendruck neu.
                 if (intro != null) player.seekTo(intro)
             }
         }
