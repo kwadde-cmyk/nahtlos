@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.core.wallet
 
 import de.jenz.nahtlos.core.AppLog
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.valueRecipients
 import de.jenz.nahtlos.core.feed.FeedRepository
@@ -85,7 +86,9 @@ class BoostService @Inject constructor(
         }
     }
 
-    suspend fun connect(raw: String): String = guard {
+    suspend fun connect(raw: String): String {
+        ensurePayments()
+        return guard {
         val uri = NwcUriSafe.parse(raw)
         val probe = withContext(Dispatchers.IO) { nwc.probe(uri) }
         store.saveUri(raw.trim())
@@ -94,6 +97,7 @@ class BoostService @Inject constructor(
         val missing = listOf("pay_keysend", "pay_invoice").filter { it !in probe.methods && probe.methods.isNotEmpty() }
         val gap = if (missing.isEmpty()) "" else " Es fehlt: ${missing.joinToString()}."
         "Verbunden mit ${probe.alias}. $balance. Verschlüsselung NIP-44.$gap"
+        }
     }
 
     suspend fun disconnect() = guard {
@@ -114,7 +118,9 @@ class BoostService @Inject constructor(
         input.positionMs,
     )
 
-    suspend fun send(input: BoostInput): PaymentView = guard {
+    suspend fun send(input: BoostInput): PaymentView {
+        ensurePayments()
+        return guard {
         if (store.readUri() == null) throw WalletException("Kein Wallet verbunden.")
         val amount = input.amountSats
         if (amount < 1) throw WalletException("Der Betrag muss mindestens 1 sat sein.")
@@ -156,9 +162,12 @@ class BoostService @Inject constructor(
         )
         store.upsert(record)
         pay(record)
+        }
     }
 
-    suspend fun retry(id: String): PaymentView = guard {
+    suspend fun retry(id: String): PaymentView {
+        ensurePayments()
+        return guard {
         val record = store.history().firstOrNull { it.id == id }
             ?: throw WalletException("Diese Zahlung ist nicht mehr im Verlauf.")
         val need = record.splits.filter { it.status == "failed" }.sumOf { it.sats }
@@ -166,9 +175,12 @@ class BoostService @Inject constructor(
             throw WalletException("Tagesbudget reicht für den Rest nicht. Es wurde nichts erneut gesendet.")
         }
         pay(record)
+        }
     }
 
-    suspend fun quickBoost(episodeKey: String, positionMs: Long): PaymentView = guard {
+    suspend fun quickBoost(episodeKey: String, positionMs: Long): PaymentView {
+        ensurePayments()
+        return guard {
         val episode = feeds.getEpisode(episodeKey) ?: throw WalletException("Keine Folge in der Wiedergabe.")
         val podcast = feeds.getPodcast(episode.podcastId) ?: throw WalletException("Der Podcast fehlt lokal.")
         val extra = episode.extras()
@@ -188,6 +200,7 @@ class BoostService @Inject constructor(
                 senderName = store.senderName(),
             ),
         )
+        }
     }
 
     private fun healStuck() {
@@ -204,6 +217,12 @@ class BoostService @Inject constructor(
                     },
                 ),
             )
+        }
+    }
+
+    private fun ensurePayments() {
+        if (!Payments.enabled) {
+            throw WalletException("Zahlungen sind in dieser Fassung ausgeschaltet.")
         }
     }
 

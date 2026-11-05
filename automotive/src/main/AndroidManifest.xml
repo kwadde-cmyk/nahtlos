@@ -4,6 +4,21 @@
     <uses-feature
         android:name="android.hardware.type.automotive"
         android:required="true" />
+    <uses-feature
+        android:name="android.hardware.wifi"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.screen.portrait"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.screen.landscape"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
 
     <application
         android:name=".AutoApp"
@@ -20,7 +35,11 @@
             android:name="com.android.automotive"
             android:resource="@xml/automotive_app_desc" />
 
-        <!-- Parked-only: no distractionOptimized flag, so the head unit blocks it while driving. -->
+        <!--
+            Einrichten, Koppeln und NWC nur im Stand.
+            Kein distractionOptimized: die Headunit sperrt die Activity während der Fahrt.
+            Zusätzlich prüft ParkedGate CarUxRestrictions, falls der Bildschirm schon offen war.
+        -->
         <activity
             android:name=".SettingsActivity"
             android:exported="true"

@@ -6,19 +6,57 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+fun nahtlosProp(name: String): String? =
+    (findProperty(name) as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(name)?.takeIf { it.isNotBlank() }
+
+val nahtlosPayments = !(nahtlosProp("NAHTLOS_PAYMENTS") ?: "true").equals("false", ignoreCase = true)
+val nahtlosKeystore = nahtlosProp("NAHTLOS_KEYSTORE")?.let { file(it) }
+val nahtlosStorePassword = nahtlosProp("NAHTLOS_KEYSTORE_PASSWORD")
+val nahtlosKeyAlias = nahtlosProp("NAHTLOS_KEY_ALIAS")
+val nahtlosKeyPassword = nahtlosProp("NAHTLOS_KEY_PASSWORD")
+val nahtlosReleaseSigning = nahtlosKeystore != null && nahtlosKeystore.isFile &&
+    !nahtlosStorePassword.isNullOrBlank() &&
+    !nahtlosKeyAlias.isNullOrBlank() &&
+    !nahtlosKeyPassword.isNullOrBlank()
+
 android {
     namespace = "de.jenz.nahtlos"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "de.jenz.nahtlos"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("boolean", "PAYMENTS_ENABLED", nahtlosPayments.toString())
+    }
+    signingConfigs {
+        if (nahtlosReleaseSigning) {
+            create("release") {
+                storeFile = nahtlosKeystore
+                storePassword = nahtlosStorePassword
+                keyAlias = nahtlosKeyAlias
+                keyPassword = nahtlosKeyPassword
+            }
+        }
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                rootProject.file("gradle/proguard-rules.pro"),
+            )
+            if (nahtlosReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+        debug {
+            if (nahtlosReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
@@ -31,7 +69,11 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
+    }
+    lint {
+        // AGP-Lint stürzt auf diesem Detector mit der mitgelieferten Kotlin-Analyse ab.
+        disable += "NullSafeMutableLiveData"
     }
     packaging {
         resources {

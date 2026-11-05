@@ -76,6 +76,18 @@ interface EpisodeDao {
     @Query("SELECT * FROM episodes WHERE podcastId = :podcastId ORDER BY publishedAt IS NULL, publishedAt DESC")
     suspend fun forPodcast(podcastId: String): List<EpisodeEntity>
 
+    @Query(
+        """
+        SELECT e.* FROM episodes e
+        INNER JOIN podcasts p ON p.id = e.podcastId
+        WHERE e.title LIKE '%' || :query || '%' ESCAPE '\' COLLATE NOCASE
+           OR p.title LIKE '%' || :query || '%' ESCAPE '\' COLLATE NOCASE
+        ORDER BY e.publishedAt IS NULL, e.publishedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun search(query: String, limit: Int): List<EpisodeEntity>
+
     @Query("SELECT episodeKey FROM episodes WHERE podcastId = :podcastId")
     suspend fun keysForPodcast(podcastId: String): List<String>
 

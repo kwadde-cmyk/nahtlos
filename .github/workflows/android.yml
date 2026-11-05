@@ -17,17 +17,65 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Android SDK
+        run: |
+          if [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "SDK schon vorhanden: $ANDROID_HOME"
+            exit 0
+          fi
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+          rm -rf /tmp/cmdline-tools
+          unzip -q /tmp/cmdtools.zip -d /tmp
+          rm -rf "$SDK/cmdline-tools/latest"
+          mv /tmp/cmdline-tools "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
       - name: Build debug APKs
-        run: ./gradlew :mobile:assembleDebug :automotive:assembleDebug
+        env:
+          NAHTLOS_KEYSTORE_BASE64: ${{ secrets.NAHTLOS_KEYSTORE_BASE64 }}
+          NAHTLOS_KEYSTORE_PASSWORD: ${{ secrets.NAHTLOS_KEYSTORE_PASSWORD }}
+          NAHTLOS_KEY_ALIAS: ${{ secrets.NAHTLOS_KEY_ALIAS }}
+          NAHTLOS_KEY_PASSWORD: ${{ secrets.NAHTLOS_KEY_PASSWORD }}
+        run: |
+          set +x
+          if [ -n "$NAHTLOS_KEYSTORE_BASE64" ] && [ -n "$NAHTLOS_KEYSTORE_PASSWORD" ] && [ -n "$NAHTLOS_KEY_ALIAS" ] && [ -n "$NAHTLOS_KEY_PASSWORD" ]; then
+            KEYSTORE="$RUNNER_TEMP/nahtlos.keystore"
+            printf '%s' "$NAHTLOS_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+            export NAHTLOS_KEYSTORE="$KEYSTORE"
+            echo "NAHTLOS_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
+          fi
+          ./gradlew :mobile:assembleDebug :automotive:assembleDebug
+      - name: Release-AABs, wenn die Signatur-Secrets gesetzt sind
+        env:
+          NAHTLOS_KEYSTORE_PASSWORD: ${{ secrets.NAHTLOS_KEYSTORE_PASSWORD }}
+          NAHTLOS_KEY_ALIAS: ${{ secrets.NAHTLOS_KEY_ALIAS }}
+          NAHTLOS_KEY_PASSWORD: ${{ secrets.NAHTLOS_KEY_PASSWORD }}
+        run: |
+          set +x
+          if [ -z "${NAHTLOS_KEYSTORE:-}" ] || [ -z "$NAHTLOS_KEYSTORE_PASSWORD" ] || [ -z "$NAHTLOS_KEY_ALIAS" ] || [ -z "$NAHTLOS_KEY_PASSWORD" ]; then
+            echo "Keine vollständigen Signatur-Secrets. Release bleibt aus, Debug-APKs wie bisher."
+            exit 0
+          fi
+          ./gradlew :mobile:bundleRelease :automotive:bundleRelease
       - name: Rename
         run: |
           mkdir -p out
           cp mobile/build/outputs/apk/debug/mobile-debug.apk out/nahtlos-mobile-debug.apk
           cp automotive/build/outputs/apk/debug/automotive-debug.apk out/nahtlos-automotive-debug.apk
+          if [ -f mobile/build/outputs/bundle/release/mobile-release.aab ]; then
+            cp mobile/build/outputs/bundle/release/mobile-release.aab out/nahtlos-mobile-release.aab
+            cp automotive/build/outputs/bundle/release/automotive-release.aab out/nahtlos-automotive-release.aab
+          fi
       - name: Publish release "latest"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes="Debug-Build von ${GITHUB_SHA::7}."
+          if ls out/*-release.aab >/dev/null 2>&1; then
+            notes="$notes Dazu signierte Release-AABs für den internen Play-Track."
+          fi
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/*.apk --title "Nahtlos (aktueller Stand)" --notes "Debug-Build von ${GITHUB_SHA::7}" --prerelease
+          gh release create latest out/* --title "Nahtlos (aktueller Stand)" --notes "$notes" --prerelease

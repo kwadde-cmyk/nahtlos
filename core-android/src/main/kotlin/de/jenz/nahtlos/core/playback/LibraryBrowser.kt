@@ -55,6 +55,20 @@ class LibraryBrowser @Inject constructor(
         }
     }
 
+    suspend fun search(raw: String): List<MediaItem> {
+        val query = raw.trim()
+        if (query.isEmpty()) {
+            val resume = continueItems().filter { it.mediaMetadata.isPlayable == true }
+            if (resume.isNotEmpty()) return resume.take(20)
+            return playlistItems().filter { it.mediaMetadata.isPlayable == true }.take(20)
+        }
+        val needle = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return db.episodes().search(needle, 30).map { episode ->
+            val podcast = db.podcasts().get(episode.podcastId)
+            episodeItem(episode, podcast, playable = true)
+        }
+    }
+
     suspend fun resolvePlayable(mediaId: String): MediaItem? {
         if (mediaId.isBlank() || LibraryIds.isFolder(mediaId)) return null
         val episode = db.episodes().get(mediaId)

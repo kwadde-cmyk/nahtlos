@@ -7,7 +7,9 @@ import android.net.NetworkCapabilities
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -15,7 +17,6 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
-import androidx.media3.common.Player
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
@@ -27,6 +28,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.AppLog
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.wallet.SecretScrub
@@ -155,7 +157,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             )
         }
         if (librarySession == null) {
-            librarySession = MediaLibrarySession.Builder(this, exo, LibraryCallback())
+            librarySession = MediaLibrarySession.Builder(this, SteeringPlayer(exo), LibraryCallback())
                 .setId("nahtlos")
                 .apply { if (sessionActivity != null) setSessionActivity(sessionActivity) }
                 .build()
@@ -217,6 +219,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     }
 
     private fun quickBoost() {
+        if (!Payments.enabled) return
         val key = player?.currentMediaItem?.mediaId
         val position = player?.currentPosition ?: 0L
         if (key.isNullOrBlank() || de.jenz.nahtlos.core.playback.LibraryIds.isFolder(key)) {
@@ -232,15 +235,19 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         }
     }
 
-    private fun carButtons(): ImmutableList<CommandButton> = ImmutableList.of(
-        actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK),
-        actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD),
-        actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS),
-        actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS),
-        actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS),
-        actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT),
-        actionButton("Boost", SessionActions.QUICK_BOOST, CommandButton.ICON_HEART_FILLED),
-    )
+    private fun carButtons(): ImmutableList<CommandButton> {
+        val buttons = ImmutableList.builder<CommandButton>()
+        buttons.add(actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK))
+        buttons.add(actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD))
+        buttons.add(actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS))
+        buttons.add(actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS))
+        buttons.add(actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS))
+        buttons.add(actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT))
+        if (Payments.enabled) {
+            buttons.add(actionButton("Boost", SessionActions.QUICK_BOOST, CommandButton.ICON_HEART_FILLED))
+        }
+        return buttons.build()
+    }
 
     private fun actionButton(name: String, action: String, icon: Int): CommandButton =
         CommandButton.Builder(icon)
@@ -261,8 +268,8 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             SessionActions.BOOST,
             SessionActions.INTRO,
             SessionActions.OUTRO,
-            SessionActions.QUICK_BOOST,
         ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
+        if (Payments.enabled) commands.add(SessionCommand(SessionActions.QUICK_BOOST, Bundle.EMPTY))
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(commands.build())
             .setAvailablePlayerCommands(Player.Commands.Builder().addAllCommands().build())
@@ -342,6 +349,28 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             else LibraryResult.ofItem(item, null)
         }
 
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = Futures.immediateFuture(LibraryResult.ofVoid())
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future(Dispatchers.IO) {
+            val found = runCatching { this@PodcastMediaLibraryService.browser.search(query) }.getOrElse { error ->
+                AppLog.record("Player", "Suche ohne Netz: ${error.message}")
+                emptyList()
+            }
+            LibraryResult.ofItemList(pageOf(found, page, pageSize), params)
+        }
+
         override fun onGetChildren(
             session: MediaLibrarySession,
             browser: ControllerInfo,
@@ -350,7 +379,10 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future(Dispatchers.IO) {
-            val children = this@PodcastMediaLibraryService.browser.children(parentId)
+            val children = runCatching { this@PodcastMediaLibraryService.browser.children(parentId) }.getOrElse { error ->
+                AppLog.record("Player", "Ordner ohne Netz: ${error.message}")
+                emptyList()
+            }
             LibraryResult.ofItemList(pageOf(children, page, pageSize), params)
         }
 
@@ -359,9 +391,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             controller: ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<List<MediaItem>> = scope.future(Dispatchers.IO) {
-            mediaItems.map { item ->
-                this@PodcastMediaLibraryService.browser.resolvePlayable(item.mediaId) ?: item
-            }
+            mediaItems.map { item -> resolveIncoming(item) }
         }
 
         override fun onSetMediaItems(
@@ -371,9 +401,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future(Dispatchers.IO) {
-            val resolved = mediaItems.map { item ->
-                this@PodcastMediaLibraryService.browser.resolvePlayable(item.mediaId) ?: item
-            }
+            val resolved = mediaItems.map { item -> resolveIncoming(item) }
             val index = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, (resolved.size - 1).coerceAtLeast(0))
             val target = resolved.getOrNull(index)
             val position = if (startPositionMs == C.TIME_UNSET) {
@@ -421,6 +449,14 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         return LibraryResult.ofError(LibraryResult.RESULT_ERROR_SESSION_AUTHENTICATION_EXPIRED, params)
     }
 
+    private suspend fun resolveIncoming(item: MediaItem): MediaItem {
+        runCatching { browser.resolvePlayable(item.mediaId) }.getOrNull()?.let { return it }
+        if (item.localConfiguration?.uri != null) return item
+        val query = item.requestMetadata.searchQuery?.toString()?.trim().orEmpty()
+            .ifEmpty { item.mediaId.trim() }
+        return runCatching { browser.search(query).firstOrNull() }.getOrNull() ?: item
+    }
+
     private fun pageOf(items: List<MediaItem>, page: Int, pageSize: Int): List<MediaItem> {
         if (items.isEmpty() || pageSize <= 0 || page < 0) return if (page == 0) items else emptyList()
         val from = page.toLong() * pageSize.toLong()
@@ -432,4 +468,27 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     companion object {
         private const val AUTOMOTIVE = "android.hardware.type.automotive"
     }
+}
+
+/**
+ * Lenkrad und Headset-Tasten „vor“/„zurück“ springen um den eingestellten Skip,
+ * nicht zur nächsten Mediendatei. Play und Pause bleiben die Player-Befehle.
+ */
+@UnstableApi
+private class SteeringPlayer(player: Player) : ForwardingPlayer(player) {
+    override fun seekToNext() = seekForward()
+
+    override fun seekToNextMediaItem() = seekForward()
+
+    override fun seekToPrevious() = seekBack()
+
+    override fun seekToPreviousMediaItem() = seekBack()
+
+    override fun getAvailableCommands(): Player.Commands =
+        super.getAvailableCommands().buildUpon()
+            .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .build()
 }

@@ -189,7 +189,7 @@ Vom Android-Emulator aus ist der Rechner `http://10.0.2.2:8787`. Ein echtes Tele
 
 ## Android bauen und sideloaden
 
-JDK 17+ und ein Android-SDK mit Platform 35. `local.properties` zeigt auf das SDK:
+JDK 17+ und ein Android-SDK mit Platform 36 (Play-Vorgabe für App-Updates seit August 2026; Android Automotive akzeptiert mindestens 35, diese Builds zielen auf 36). `local.properties` zeigt auf das SDK:
 
 ```properties
 sdk.dir=/pfad/zum/android-sdk
@@ -207,7 +207,23 @@ Die Debug-APKs:
 - Telefon: `mobile/build/outputs/apk/debug/mobile-debug.apk`
 - AAOS: `automotive/build/outputs/apk/debug/automotive-debug.apk`
 
-Die Automotive-APK lässt sich nicht auf einem normalen Telefon installieren, die Telefon-APK ist keine AAOS-Media-App. Beide sind mit dem Debug-Keystore signiert und brauchen keinen Play Store.
+Die Automotive-APK lässt sich nicht auf einem normalen Telefon installieren, die Telefon-APK ist keine AAOS-Media-App. Ohne Signatur-Variablen sind beide mit dem Debug-Keystore signiert. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`. Getrennte applicationIds, zwei Play-Einträge: Telefon und Auto sind zwei Installationen, die sich koppeln, und teilen sich so keinen versionCode. Dieselbe Id würde auf der Headunit riskieren, dass ein höheres Telefon-Bundle die Auto-App ersetzt.
+
+### Release und Play
+
+Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYSTORE`, `NAHTLOS_KEYSTORE_PASSWORD`, `NAHTLOS_KEY_ALIAS`, `NAHTLOS_KEY_PASSWORD`. Sind alle vier gesetzt und die Datei lesbar, signiert der Release damit, und der Debug-Build ebenfalls, damit ein Update ohne Deinstallation geht. Fehlt etwas, bleibt der Release unsigniert und der Debug-Build beim Debug-Keystore. Bei einem PKCS12-Keystore sind Store- und Key-Passwort dasselbe.
+
+```bash
+./gradlew :mobile:bundleRelease :automotive:bundleRelease
+```
+
+R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
+
+```bash
+./gradlew :mobile:bundleRelease :automotive:bundleRelease -PNAHTLOS_PAYMENTS=false
+```
+
+Die Datenschutzerklärung steht in `PRIVACY.md` (Deutsch und Englisch). In der Play Console als URL hinterlegen, zum Beispiel die Datei aus dem Repo auf dem eigenen Server.
 
 Telefon:
 

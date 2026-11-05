@@ -49,6 +49,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.CrashLog
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
@@ -138,7 +139,9 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyLarge,
             )
             val scope = androidx.compose.runtime.rememberCoroutineScope()
-            WalletSection(onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } })
+            if (Payments.enabled) {
+                WalletSection(onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } })
+            }
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = url,
