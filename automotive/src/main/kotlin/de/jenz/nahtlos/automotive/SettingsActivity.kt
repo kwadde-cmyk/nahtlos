@@ -3,6 +3,7 @@ package de.jenz.nahtlos.automotive
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -48,6 +49,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.SettingsViewModel
+import de.jenz.nahtlos.core.playback.AutomotiveSetup
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.wallet.formatSats
 import de.jenz.nahtlos.feed.EpisodeHorizon
@@ -65,10 +67,11 @@ import java.util.Locale
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val openPairing = intent.getBooleanExtra(AutomotiveSetup.EXTRA_OPEN_PAIRING, false)
         setContent {
             AutoTheme {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    CarSettings()
+                    CarSettings(openPairing = openPairing)
                 }
             }
         }
@@ -76,7 +79,10 @@ class SettingsActivity : ComponentActivity() {
 }
 
 @Composable
-private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
+private fun CarSettings(
+    openPairing: Boolean,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val walletModel: WalletViewModel = hiltViewModel()
     val wallet by walletModel.state.collectAsStateWithLifecycle()
@@ -97,6 +103,8 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
+    var nav by remember { mutableStateOf(AutoNav.initial(openPairing)) }
+    val leave = { MediaCenterExit.open(context) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
         crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
@@ -107,35 +115,77 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     LaunchedEffect(walletModel) {
         walletModel.notice.collectLatest { snackbar.showSnackbar(it) }
     }
-    if (driving) {
-        Box(Modifier.fillMaxSize().padding(48.dp)) {
-            Column(Modifier.widthIn(max = 840.dp)) {
-                Text("Bitte im Stand einrichten", style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    "Kopplung, Server-Token und Wallet-Link gibt es nur, wenn das Auto steht. Die Wiedergabe läuft über die Medien-App weiter.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-            }
-        }
-        return
+    LaunchedEffect(driving) {
+        nav = nav.withDriving(driving)
     }
+    BackHandler {
+        val next = nav.back()
+        if (next == null) leave() else nav = next
+    }
+    val server = url.trim().trimEnd('/')
     Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 840.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 48.dp, vertical = 28.dp),
-        ) {
+        Column(Modifier.fillMaxSize().widthIn(max = 840.dp)) {
+            SettingsBar(
+                onBack = {
+                    val next = nav.back()
+                    if (next == null) leave() else nav = next
+                },
+                onMediaCenter = leave,
+                showMediaCenter = nav.visible == AutoScreen.Pairing,
+            )
+            when (nav.visible) {
+                AutoScreen.Locked -> Column(Modifier.padding(horizontal = 48.dp, vertical = 28.dp)) {
+                    Text("Bitte im Stand einrichten", style = MaterialTheme.typography.headlineLarge)
+                    Text(
+                        "Kopplung, Server-Token und Wallet-Link gibt es nur, wenn das Auto steht. Die Wiedergabe läuft über die Medien-App weiter.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+                AutoScreen.Pairing -> Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 48.dp, vertical = 12.dp),
+                ) {
+                    Text("Handy koppeln", style = MaterialTheme.typography.headlineLarge)
+                    Text(
+                        "QR-Code und Kurzcode. Das Handy scannt oder tippt den Code und gibt dieses Auto frei.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                    )
+                    if (server.isBlank()) {
+                        OutlinedTextField(
+                            value = url,
+                            onValueChange = { url = it },
+                            label = { Text("Server-URL") },
+                            placeholder = { Text("http://192.168.1.20:8787") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        )
+                    }
+                    CarPairing(serverUrl = server, configured = state.configured)
+                }
+                AutoScreen.Settings -> Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 48.dp, vertical = 12.dp),
+                ) {
             Text("Nahtlos", style = MaterialTheme.typography.headlineLarge)
             Text(
                 "Geparkt einrichten. Danach spielt die Medien-App ab der Position, an der das Telefon pausiert hat. Dieser Bildschirm hat kein distractionOptimized und bleibt während der Fahrt gesperrt.",
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
             )
-            CarPairing(
-                serverUrl = url.trim().trimEnd('/'),
-                configured = state.configured,
+            Button(
+                onClick = { nav = nav.openPairing() },
+                modifier = Modifier.fillMaxWidth().height(76.dp),
+            ) { Text(if (state.configured) "Erneut per QR-Code koppeln" else "Handy per QR-Code koppeln") }
+            Text(
+                "Zeigt den QR-Code und den Kurzcode. Das Handy muss denselben Server erreichen.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
             )
             Text("Server-Adresse", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -343,8 +393,30 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text("Verbindung prüfen") }
+                }
+            }
         }
         SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp))
+    }
+}
+
+@Composable
+private fun SettingsBar(
+    onBack: () -> Unit,
+    onMediaCenter: () -> Unit,
+    showMediaCenter: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Button(onClick = onBack, modifier = Modifier.height(64.dp)) { Text("Zurück") }
+        if (showMediaCenter) {
+            OutlinedButton(
+                onClick = onMediaCenter,
+                modifier = Modifier.padding(start = 12.dp).height(64.dp),
+            ) { Text("Mediencenter") }
+        }
     }
 }
 
