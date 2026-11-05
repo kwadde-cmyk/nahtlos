@@ -105,4 +105,10 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.coil.compose)
     compileOnly(files(android.sdkDirectory.resolve("platforms/android-36/optional/android.car.jar")))
+    testImplementation(libs.kotlin.test.junit5)
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:${libs.versions.junit.get()}")
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test> {
+    useJUnitPlatform()
 }

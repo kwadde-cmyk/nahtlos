@@ -20,6 +20,16 @@
         android:name="android.hardware.camera.any"
         android:required="false" />
 
+    <queries>
+        <intent>
+            <action android:name="android.car.intent.action.MEDIA_TEMPLATE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AutoApp"
         android:allowBackup="true"

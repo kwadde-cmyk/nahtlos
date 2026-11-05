@@ -144,7 +144,7 @@ fun CarPairing(
             Button(
                 onClick = { viewModel.start(serverUrl) },
                 modifier = Modifier.fillMaxWidth().height(64.dp),
-            ) { Text(if (configured) "Erneut koppeln" else "Code anzeigen") }
+            ) { Text(if (configured) "QR-Code erneut anzeigen" else "QR-Code anzeigen") }
         } else {
             if (ui.link.isNotBlank()) {
                 val image = remember(ui.link) { pairingQr(ui.link) }

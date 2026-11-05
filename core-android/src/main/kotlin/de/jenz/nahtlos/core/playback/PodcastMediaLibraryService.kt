@@ -438,10 +438,10 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             val pending = PendingIntent.getActivity(
                 this,
                 2,
-                launch,
+                AutomotiveSetup.openPairing(launch),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            extras.putString(MediaConstants.EXTRAS_KEY_ERROR_RESOLUTION_ACTION_LABEL_COMPAT, "Server einrichten")
+            extras.putString(MediaConstants.EXTRAS_KEY_ERROR_RESOLUTION_ACTION_LABEL_COMPAT, AutomotiveSetup.RESOLUTION_LABEL)
             extras.putParcelable(MediaConstants.EXTRAS_KEY_ERROR_RESOLUTION_ACTION_INTENT_COMPAT, pending)
         }
         val params = LibraryParams.Builder().setExtras(extras).build()
