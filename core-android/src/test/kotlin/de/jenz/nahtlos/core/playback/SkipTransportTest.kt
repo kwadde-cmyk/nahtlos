@@ -57,13 +57,33 @@ class SkipTransportTest {
         assertEquals(105_000L, recording.sought)
 
         var announced: Player.Commands? = null
+        var seenState = -1
+        var playing: Boolean? = null
+        var itemSeen = false
         val listener = object : Player.Listener {
             override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
                 announced = availableCommands
             }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                seenState = playbackState
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+            }
+
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                itemSeen = true
+            }
         }
         transport.addListener(listener)
-        recording.fireEmptyCommands()
+        val playPause = Player.Commands.Builder().add(Player.COMMAND_PLAY_PAUSE).build()
+        recording.fire(playPause)
+        assertEquals(Player.STATE_READY, seenState)
+        assertEquals(true, playing)
+        assertTrue(itemSeen)
+        assertTrue(announced!!.contains(Player.COMMAND_PLAY_PAUSE))
         SkipTransport.transportCommands.forEach { command ->
             assertTrue(announced!!.contains(command))
         }
@@ -90,8 +110,14 @@ class SkipTransportTest {
             listeners -= listener
         }
 
-        fun fireEmptyCommands() {
-            listeners.forEach { it.onAvailableCommandsChanged(Player.Commands.EMPTY) }
+        fun fire(commands: Player.Commands) {
+            val item = androidx.media3.common.MediaItem.Builder().setMediaId("episode").build()
+            listeners.forEach { listener ->
+                listener.onPlaybackStateChanged(Player.STATE_READY)
+                listener.onIsPlayingChanged(true)
+                listener.onMediaItemTransition(item, Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+                listener.onAvailableCommandsChanged(commands)
+            }
         }
     }
 }
