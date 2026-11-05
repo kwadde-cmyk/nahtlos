@@ -3,6 +3,7 @@ package de.jenz.nahtlos.core.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.widget.Toast
 import android.net.NetworkCapabilities
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
@@ -229,32 +230,33 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         }
         scope.launch(Dispatchers.IO) {
             val message = runCatching { boosts.quickBoost(key, position) }.fold(
-                { view -> "Schnell-Boost ${view.totalSats} sats, ${view.lines.count { !it.error }} gesendet." },
-                { SecretScrub.message(it.message) },
+                { view ->
+                    val failed = view.lines.count { it.error }
+                    if (failed == 0) "Boost ${view.totalSats} sats gesendet."
+                    else "Boost unvollständig: $failed Empfänger nicht erreicht."
+                },
+                { CarControls.boostNotice(SecretScrub.message(it.message)) },
             )
             AppLog.record("Wallet", message)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@PodcastMediaLibraryService, message, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
     private fun carButtons(): ImmutableList<CommandButton> {
-        val buttons = ImmutableList.builder<CommandButton>()
-        buttons.add(actionButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK))
-        buttons.add(actionButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD))
-        buttons.add(actionButton("Kapitel zurück", SessionActions.CHAPTER_PREV, CommandButton.ICON_PREVIOUS))
-        buttons.add(actionButton("Nächstes Kapitel", SessionActions.CHAPTER_NEXT, CommandButton.ICON_NEXT))
-        if (Payments.enabled) {
-            buttons.add(actionButton("Boost", SessionActions.QUICK_BOOST, CommandButton.ICON_HEART_FILLED))
-        }
-        buttons.add(actionButton("Langsamer", SessionActions.SPEED_DOWN, CommandButton.ICON_MINUS))
-        buttons.add(actionButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS))
-        return buttons.build()
+        val automotive = packageManager.hasSystemFeature(AUTOMOTIVE)
+        return ImmutableList.copyOf(
+            CarControls.buttons(payments = Payments.enabled, automotive = automotive).map { spec ->
+                val builder = CommandButton.Builder(spec.icon)
+                    .setDisplayName(spec.name)
+                    .setSessionCommand(SessionCommand(spec.action, Bundle.EMPTY))
+                if (spec.iconRes != 0) builder.setIconResId(spec.iconRes)
+                if (spec.slots.isNotEmpty()) builder.setSlots(*spec.slots)
+                builder.build()
+            },
+        )
     }
-
-    private fun actionButton(name: String, action: String, icon: Int): CommandButton =
-        CommandButton.Builder(icon)
-            .setDisplayName(name)
-            .setSessionCommand(SessionCommand(action, Bundle.EMPTY))
-            .build()
 
     private fun accepted(session: MediaSession): MediaSession.ConnectionResult {
         val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
@@ -271,10 +273,12 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             SessionActions.OUTRO,
         ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
         if (Payments.enabled) commands.add(SessionCommand(SessionActions.QUICK_BOOST, Bundle.EMPTY))
+        val buttons = carButtons()
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(commands.build())
             .setAvailablePlayerCommands(Player.Commands.Builder().addAllCommands().build())
-            .setCustomLayout(carButtons())
+            .setCustomLayout(buttons)
+            .setMediaButtonPreferences(buttons)
             .build()
     }
 
