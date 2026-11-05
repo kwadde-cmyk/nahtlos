@@ -4,6 +4,7 @@ import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
 import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.CrashLog
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.sync.RealtimeSync
 import javax.inject.Inject
@@ -13,6 +14,7 @@ class AutoApp : Application() {
     @Inject lateinit var realtime: RealtimeSync
 
     override fun onCreate() {
+        Payments.enabled = BuildConfig.PAYMENTS_ENABLED
         CrashLog.install(this)
         AppLog.install(this)
         ArtworkStore.installCoil(this)

@@ -47,6 +47,7 @@ import de.jenz.nahtlos.core.db.EpisodeRow
 import de.jenz.nahtlos.core.db.PodcastEntity
 import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.persons
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.db.valueRecipients
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.feed.FeedRefresh
@@ -317,7 +318,7 @@ private fun EpisodeList(
                         }
                     }
                 }
-                if (podcast.valueRecipients().isNotEmpty()) {
+                if (Payments.enabled && podcast.valueRecipients().isNotEmpty()) {
                     TextButton(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
                 }
                 if (podcast.description.isNotBlank()) {

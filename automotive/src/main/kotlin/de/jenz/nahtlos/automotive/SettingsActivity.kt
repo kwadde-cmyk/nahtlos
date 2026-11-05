@@ -46,6 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import de.jenz.nahtlos.core.CrashLog
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.wallet.formatSats
@@ -79,6 +80,7 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val walletModel: WalletViewModel = hiltViewModel()
     val wallet by walletModel.state.collectAsStateWithLifecycle()
+    val driving by rememberDriving()
     var url by remember(state.serverUrl) {
         mutableStateOf(state.serverUrl.ifBlank { BuildConfig.NAHTLOS_DEFAULT_SERVER })
     }
@@ -104,6 +106,19 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
     }
     LaunchedEffect(walletModel) {
         walletModel.notice.collectLatest { snackbar.showSnackbar(it) }
+    }
+    if (driving) {
+        Box(Modifier.fillMaxSize().padding(48.dp)) {
+            Column(Modifier.widthIn(max = 840.dp)) {
+                Text("Bitte im Stand einrichten", style = MaterialTheme.typography.headlineLarge)
+                Text(
+                    "Kopplung, Server-Token und Wallet-Link gibt es nur, wenn das Auto steht. Die Wiedergabe läuft über die Medien-App weiter.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        }
+        return
     }
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -152,6 +167,7 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(20.dp))
+            if (Payments.enabled) {
             Text("Wallet & Zahlungen", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Eigener NWC-Link von Alby Hub, nur auf diesem Auto und verschlüsselt. Er geht nicht über den Server. Im Media-Center gibt es einen Boost-Knopf mit dem Standardbetrag, ohne Eingabe. Einen QR-Scanner gibt es hier nicht.",
@@ -214,6 +230,7 @@ private fun CarSettings(viewModel: SettingsViewModel = hiltViewModel()) {
                 if (payment.canRetry) {
                     androidx.compose.material3.TextButton(onClick = { walletModel.retry(payment.id) }) { Text("Fehlende erneut") }
                 }
+            }
             }
             Spacer(Modifier.height(16.dp))
             Text("Puffer für Funklöcher: $buffer Minuten", style = MaterialTheme.typography.titleMedium)

@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import de.jenz.nahtlos.core.Payments
 
 private enum class DossierTab(val label: String) { Notes("Shownotes"), Chapters("Kapitel"), Transcript("Transkript"), People("Personen"), Support("Unterstützen") }
 
@@ -232,11 +233,17 @@ private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit, o
         Text("Value4Value", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
         details.valueSuggested?.let { Text("Vorschlag aus dem Feed: $it") }
         Text(
-            "Empfänger und Splits. Ein Boost geht über Alby Hub (NWC), Streaming-Sats kommen später.",
+            if (Payments.enabled) {
+                "Empfänger und Splits. Ein Boost geht über Alby Hub (NWC), Streaming-Sats kommen später."
+            } else {
+                "Empfänger und Splits. Zahlungen sind in dieser Fassung aus."
+            },
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
         )
-        Button(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
+        if (Payments.enabled) {
+            Button(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
+        }
         if (details.timeSplits.isNotEmpty()) {
             Text(
                 "Zeitfenster ändern die Empfänger an der aktuellen Stelle.",

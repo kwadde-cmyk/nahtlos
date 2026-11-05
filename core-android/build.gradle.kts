@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "de.jenz.nahtlos.core"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
