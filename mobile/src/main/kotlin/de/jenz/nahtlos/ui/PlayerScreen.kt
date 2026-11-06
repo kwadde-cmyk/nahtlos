@@ -307,7 +307,9 @@ fun PlayerScreen(
                     }
                     if (Payments.enabled) {
                         Button(
+                            enabled = !wallet.busy,
                             onClick = {
+                                if (wallet.busy) return@Button
                                 walletModel.clearResult()
                                 boostOpen = true
                             },

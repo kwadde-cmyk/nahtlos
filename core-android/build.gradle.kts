@@ -43,6 +43,7 @@ dependencies {
     implementation("androidx.hilt:hilt-lifecycle-viewmodel:1.3.0")
     ksp(libs.hilt.compiler)
     implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.session)
     implementation(libs.media3.datasource)
     implementation(libs.media3.database)

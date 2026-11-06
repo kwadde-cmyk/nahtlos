@@ -18,6 +18,8 @@ import de.jenz.nahtlos.model.WalletCipherRequest
 import de.jenz.nahtlos.model.WalletOpenRequest
 import de.jenz.nahtlos.model.WalletOpenResponse
 import de.jenz.nahtlos.model.WalletPollResponse
+import de.jenz.nahtlos.sync.BoostBatchRequest
+import de.jenz.nahtlos.sync.BoostSyncItem
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
@@ -151,6 +153,16 @@ class SyncClient @Inject constructor(
     suspend fun putWalletCipher(settings: ServerSettings, sessionId: String, ciphertext: String) {
         val id = URLEncoder.encode(sessionId, Charsets.UTF_8.name())
         authed(settings, "/v1/wallet-relay/$id/cipher", "POST", json.encodeToString(WalletCipherRequest(ciphertext)))
+    }
+
+    suspend fun putBoosts(settings: ServerSettings, items: List<BoostSyncItem>): List<BoostSyncItem> {
+        val result = authed(settings, "/v1/boosts", "PUT", json.encodeToString(BoostBatchRequest(items.take(80))))
+        return json.decodeFromString(result)
+    }
+
+    suspend fun getBoosts(settings: ServerSettings, since: Long?): List<BoostSyncItem> {
+        val path = if (since == null) "/v1/boosts" else "/v1/boosts?since=$since"
+        return json.decodeFromString(authed(settings, path, "GET", null))
     }
 
     suspend fun pollWalletRelay(settings: ServerSettings, sessionId: String): WalletPollResponse {

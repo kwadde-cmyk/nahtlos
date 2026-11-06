@@ -10,6 +10,7 @@ import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.playlist.entry
 import java.net.URLDecoder
@@ -34,8 +35,19 @@ class LibraryBrowser @Inject constructor(
         return item to row.positionMs.coerceAtLeast(0L)
     }
 
+    fun browseFolder(): MediaItem =
+        folder(LibraryIds.BROWSE, "Bibliothek", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS, "Playlist, Downloads, Abos")
+
+    fun emptyPlayback(): MediaItem =
+        note("now:empty", "Nichts läuft", "Bibliothek oder Playlist öffnen")
+
     suspend fun children(parentId: String): List<MediaItem> = when (parentId) {
         LibraryIds.ROOT -> listOf(
+            folder(LibraryIds.PLAYLIST, "Playlist", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
+            folder(LibraryIds.CONTINUE, "Weitermachen", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
+            folder(LibraryIds.SUBSCRIPTIONS, "Abonnements", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
+        )
+        LibraryIds.BROWSE -> listOf(
             folder(LibraryIds.PLAYLIST, "Playlist", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
             folder(LibraryIds.CONTINUE, "Weitermachen", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
             folder(LibraryIds.SUBSCRIPTIONS, "Abonnements", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
@@ -81,7 +93,7 @@ class LibraryBrowser @Inject constructor(
         return MediaItem.Builder()
             .setMediaId(entry.episodeKey)
             .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-            .setMimeType("audio/mpeg")
+            .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(entry.title.ifBlank { "Folge" })
@@ -103,7 +115,7 @@ class LibraryBrowser @Inject constructor(
             MediaItem.Builder()
                 .setMediaId(entry.episodeKey)
                 .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-                .setMimeType("audio/mpeg")
+                .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(entry.title.ifBlank { "Folge" })
@@ -184,7 +196,7 @@ class LibraryBrowser @Inject constructor(
         val builder = MediaItem.Builder()
             .setMediaId(episode.episodeKey)
             .setUri(localOrRemote(episode.episodeKey, episode.enclosureUrl))
-            .setMimeType(episode.mimeType ?: "audio/mpeg")
+            .apply { AudioSource.mediaMime(episode.mimeType, episode.enclosureUrl)?.let { setMimeType(it) } }
         val extras = episode.extras()
         val title = if (extras.live) "Live: ${episode.title}" else episode.title
         val chapterHint = episode.chaptersJson != "[]" || !episode.chaptersUrl.isNullOrBlank()
@@ -252,6 +264,7 @@ class LibraryBrowser @Inject constructor(
 
 object LibraryIds {
     const val ROOT = "root"
+    const val BROWSE = "browse"
     const val CONTINUE = "continue"
     const val SUBSCRIPTIONS = "subscriptions"
     const val PLAYLIST = "playlist"
@@ -264,6 +277,6 @@ object LibraryIds {
     }
 
     fun isFolder(mediaId: String): Boolean =
-        mediaId == ROOT || mediaId == CONTINUE || mediaId == SUBSCRIPTIONS || mediaId == PLAYLIST ||
-            mediaId.startsWith("pod:") || mediaId.startsWith("empty")
+        mediaId == ROOT || mediaId == BROWSE || mediaId == CONTINUE || mediaId == SUBSCRIPTIONS || mediaId == PLAYLIST ||
+            mediaId.startsWith("pod:") || mediaId.startsWith("empty") || mediaId.startsWith("now:")
 }

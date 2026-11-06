@@ -23,10 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.jenz.nahtlos.core.wallet.WalletViewModel
-import java.time.Instant
+import de.jenz.nahtlos.sync.BoostSync
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,9 +47,9 @@ fun BoostHistoryScreen(
     ) { padding ->
         if (state.historyEntries.isEmpty()) {
             Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
-                Text("Noch keine Boosts auf diesem Gerät.")
+                Text("Noch keine Boosts.")
                 Text(
-                    "Ab jetzt bleibt jeder gesendete und fehlgeschlagene Boost hier. Der Verlauf liegt nur auf dem Gerät und geht nicht an den Server.",
+                    "Gesendete und fehlgeschlagene Boosts stehen hier mit Datum und Uhrzeit. Der Verlauf gleicht sich mit dem anderen Gerät ab. Der Wallet-Link bleibt auf dem Gerät.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -63,14 +61,15 @@ fun BoostHistoryScreen(
             ) {
                 item {
                     Text(
-                        "Nur auf diesem Gerät. Der Wallet-Link steht hier nicht.",
+                        "Gleiche Liste auf Handy und Auto. Datum und Uhrzeit sind die lokale Gerätezeit. Der Wallet-Link wird nicht synchronisiert.",
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 items(state.historyEntries, key = { it.id }) { entry ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-                        Text(formatBoostWhen(entry.atMs), style = MaterialTheme.typography.labelLarge)
+                        Text(BoostSync.formatWhen(entry.atMs, ZoneId.systemDefault()), style = MaterialTheme.typography.titleMedium)
+                        Text("Datum und Uhrzeit", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("${entry.totalSats} sats · ${entry.podcast}", style = MaterialTheme.typography.titleMedium)
                         if (entry.episode.isNotBlank()) {
                             Text(entry.episode, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -101,7 +100,3 @@ fun BoostHistoryScreen(
     }
 }
 
-private fun formatBoostWhen(epochMs: Long): String {
-    val formatter = DateTimeFormatter.ofPattern("d. MMM yyyy, HH:mm", Locale.GERMAN)
-    return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(formatter)
-}

@@ -34,6 +34,7 @@
 # Media3: Session-Dienst und ExoPlayer werden per Manifest und Reflexion angesprochen.
 -keep class androidx.media3.session.** { *; }
 -keep class androidx.media3.exoplayer.** { *; }
+-keep class androidx.media3.exoplayer.hls.** { *; }
 -keep class androidx.media3.common.** { *; }
 -dontwarn androidx.media3.**
 

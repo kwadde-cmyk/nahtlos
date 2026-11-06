@@ -152,6 +152,15 @@ NAHTLOS_PORT=8790 docker compose up --build
 
 Die Datenbank liegt im Volume unter `/data/sync.db`.
 
+Boost-Verlauf (id, Zeitpunkt, Summe, Podcast, Folge, Empfänger mit Name, Adresse, Betrag und Status) liegt in der Tabelle `boosts`. Dieselbe Datei bleibt gültig: der Server legt die Tabelle mit `CREATE TABLE IF NOT EXISTS` an und rührt vorhandene Tabellen nicht an. Auf dem Pi, im Ordner mit `docker-compose.yml`:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Das Volume mit `sync.db` nicht löschen. Danach `GET /health` prüfen. Pro Gerät dieselbe Historie, gleiche Id wird nicht doppelt gespeichert, der neuere Zeitpunkt gewinnt. NWC-Link, Preimage, Invoice und Wallet-Geheimnis nimmt der Server nicht an und schreibt sie nicht ins Log.
+
 ### Nginx Proxy Manager
 
 Lege einen Proxy Host auf die öffentliche HTTPS-Adresse an, zum Beispiel `https://podcast.example.com`.

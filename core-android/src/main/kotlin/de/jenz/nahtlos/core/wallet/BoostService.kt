@@ -19,8 +19,12 @@ import de.jenz.nahtlos.wallet.SplitShare
 import de.jenz.nahtlos.wallet.WalletException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import de.jenz.nahtlos.sync.BoostSync
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -60,6 +64,8 @@ class BoostService @Inject constructor(
     private val busy = AtomicBoolean(false)
     private val _state = MutableStateFlow(WalletUi())
     val state: StateFlow<WalletUi> = _state.asStateFlow()
+    private val _outcome = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val outcome: SharedFlow<String> = _outcome.asSharedFlow()
     private val lnurl = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).build()
 
     init {
@@ -148,6 +154,7 @@ class BoostService @Inject constructor(
             message = input.message.trim(),
             senderName = input.senderName.ifBlank { store.senderName() },
             totalSats = amount,
+            updatedAt = System.currentTimeMillis(),
             splits = shares.map { share ->
                 StoredSplit(
                     name = share.name,
@@ -221,6 +228,16 @@ class BoostService @Inject constructor(
         }
     }
 
+    fun announce(text: String) {
+        _outcome.tryEmit(text)
+    }
+
+    fun outcomeText(view: PaymentView): String {
+        val failed = view.lines.any { it.error }
+        val headline = BoostSync.outcome(failed)
+        return if (failed) "$headline. ${view.lines.count { it.error }} Empfänger nicht erreicht." else "$headline. ${view.totalSats} sats."
+    }
+
     private fun ensurePayments() {
         if (!Payments.enabled) {
             throw WalletException("Zahlungen sind in dieser Fassung ausgeschaltet.")
@@ -262,6 +279,7 @@ class BoostService @Inject constructor(
             message = "",
             senderName = input.senderName,
             totalSats = amount,
+            updatedAt = System.currentTimeMillis(),
             splits = shares.map { share ->
                 StoredSplit(
                     name = share.name,
@@ -373,7 +391,7 @@ class BoostService @Inject constructor(
     private fun update(payment: StoredPayment, index: Int, block: (StoredSplit) -> StoredSplit): StoredPayment {
         val splits = payment.splits.toMutableList()
         splits[index] = block(splits[index])
-        val next = payment.copy(splits = splits)
+        val next = payment.copy(splits = splits, updatedAt = System.currentTimeMillis())
         store.upsert(next)
         return next
     }

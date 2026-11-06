@@ -34,6 +34,12 @@ import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.wallet.SecretScrub
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
+import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.playback.AudioSource
+import de.jenz.nahtlos.playback.HeaderKind
+import de.jenz.nahtlos.core.net.Net
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
@@ -57,6 +63,8 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var playbackCache: PlaybackCache
     @Inject lateinit var playlists: PlaylistRepository
     @Inject lateinit var downloads: DownloadScheduler
+    @Inject lateinit var downloadFiles: DownloadStore
+    @Inject lateinit var http: OkHttpClient
     @Inject lateinit var feeds: FeedRepository
     @Inject lateinit var artwork: ArtworkStore
     @Inject lateinit var boosts: BoostService
@@ -67,12 +75,16 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     private var playbackSync: PlaybackSync? = null
     private var effects: PlaybackEffects? = null
     private val fallingBack = mutableSetOf<String>()
+    private val probed = mutableSetOf<String>()
 
     override fun onCreate() {
         super.onCreate()
         val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(playbackCache.dataSourceFactory())
+                DefaultMediaSourceFactory(playbackCache.dataSourceFactory()).also {
+                    // HLS wird per Klassenname geladen. Die Referenz hält die Klasse im Release.
+                    check(androidx.media3.exoplayer.hls.HlsMediaSource.Factory::class.java.name.isNotEmpty())
+                }
                     .setLoadErrorHandlingPolicy(PlaybackLoadPolicy()),
             )
             .setLoadControl(ConfigurableLoadControl { settings.read().bufferAheadMinutes })
@@ -100,26 +112,47 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 AppLog.record("Player", error.message ?: "Wiedergabe fehlgeschlagen", error)
                 val current = player ?: return
                 val item = current.currentMediaItem ?: return
-                val uri = item.localConfiguration?.uri
-                val scheme = uri?.scheme?.lowercase()
-                if (scheme != "file" && scheme != "content") return
-                if (!fallingBack.add(item.mediaId)) return
+                val uri = item.localConfiguration?.uri ?: return
+                val scheme = uri.scheme?.lowercase()
                 val position = current.currentPosition.coerceAtLeast(0L)
-                scope.launch {
-                    val remote = runCatching { browser.streamUri(item.mediaId) }.getOrNull()
-                    withContext(Dispatchers.Main) {
-                        val playerNow = player
-                        if (remote == null || playerNow == null || playerNow.currentMediaItem?.mediaId != item.mediaId) {
-                            fallingBack.remove(item.mediaId)
-                            return@withContext
+                if (scheme == "file" || scheme == "content") {
+                    if (!fallingBack.add(item.mediaId)) return
+                    scope.launch {
+                        val remote = runCatching { browser.streamUri(item.mediaId) }.getOrNull()
+                        runCatching { downloadFiles.delete(item.mediaId) }
+                        withContext(Dispatchers.Main) {
+                            val playerNow = player
+                            if (remote == null || playerNow == null || playerNow.currentMediaItem?.mediaId != item.mediaId) {
+                                fallingBack.remove(item.mediaId)
+                                return@withContext
+                            }
+                            AppLog.record("Player", "Lokale Datei für ${item.mediaId} fehlgeschlagen, weiche auf den Stream aus.")
+                            playbackSync?.suppressPushes()
+                            playerNow.setMediaItem(playableItem(item, remote), position)
+                            playerNow.prepare()
+                            playerNow.play()
                         }
-                        AppLog.record("Player", "Lokale Datei für ${item.mediaId} fehlgeschlagen, weiche auf den Stream aus.")
-                        playbackSync?.suppressPushes()
-                        playerNow.setMediaItem(item.buildUpon().setUri(remote).build(), position)
-                        playerNow.prepare()
-                        playerNow.play()
+                    }.invokeOnCompletion { fallingBack.remove(item.mediaId) }
+                    return
+                }
+                if ((scheme == "http" || scheme == "https") && unrecognized(error) && probed.add(item.mediaId)) {
+                    scope.launch(Dispatchers.IO) {
+                        val peeked = peekStream(uri.toString())
+                        withContext(Dispatchers.Main) {
+                            val playerNow = player ?: return@withContext
+                            if (playerNow.currentMediaItem?.mediaId != item.mediaId) return@withContext
+                            if (peeked == AudioSource.HLS) {
+                                AppLog.record("Player", "Stream ist eine Playlist, spiele HLS.")
+                                playbackSync?.suppressPushes()
+                                playerNow.setMediaItem(item.buildUpon().setUri(uri).setMimeType(AudioSource.HLS).build(), position)
+                                playerNow.prepare()
+                                playerNow.play()
+                            } else {
+                                AppLog.record("Player", "Stream für ${item.mediaId} ist kein abspielbares Audio.")
+                            }
+                        }
                     }
-                }.invokeOnCompletion { fallingBack.remove(item.mediaId) }
+                }
             }
         })
         scope.launch {
@@ -220,27 +253,73 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private fun playableItem(item: androidx.media3.common.MediaItem, remote: android.net.Uri): androidx.media3.common.MediaItem {
+        val next = item.buildUpon().setUri(remote)
+        val mime = AudioSource.mediaMime(null, remote.toString())
+        if (mime != null) next.setMimeType(mime)
+        return next.build()
+    }
+
+    private fun unrecognized(error: Throwable): Boolean {
+        var current: Throwable? = error
+        while (current != null) {
+            if (current.javaClass.name.endsWith("UnrecognizedInputFormatException")) return true
+            current = current.cause
+        }
+        return false
+    }
+
+    private fun peekStream(url: String): String? = runCatching {
+        val request = Request.Builder().url(url).header("User-Agent", Net.USER_AGENT).header("Range", "bytes=0-511").build()
+        http.newBuilder().callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
+            val buffer = ByteArray(512)
+            val read = response.body?.byteStream()?.use { it.read(buffer) } ?: -1
+            val bytes = if (read > 0) buffer.copyOf(read) else byteArrayOf()
+            val type = response.header("Content-Type")
+            val finalUrl = response.request.url.toString()
+            if (AudioSource.mediaMime(type, finalUrl) == AudioSource.HLS || AudioSource.headerKind(bytes) == HeaderKind.PLAYLIST) {
+                AudioSource.HLS
+            } else if (AudioSource.headerKind(bytes) == HeaderKind.MARKUP) {
+                null
+            } else {
+                AudioSource.mediaMime(type, finalUrl)
+            }
+        }
+    }.getOrNull()
+
+    private val quickBoostBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun quickBoost() {
         if (!Payments.enabled) return
+        if (!de.jenz.nahtlos.sync.BoostSync.acceptTap(quickBoostBusy.get()) || !quickBoostBusy.compareAndSet(false, true)) {
+            showBoost("Eine Zahlung läuft schon.")
+            return
+        }
         val key = player?.currentMediaItem?.mediaId
         val position = player?.currentPosition ?: 0L
-        if (key.isNullOrBlank() || de.jenz.nahtlos.core.playback.LibraryIds.isFolder(key)) {
-            AppLog.record("Wallet", "Schnell-Boost: keine Folge in der Wiedergabe.")
+        if (key.isNullOrBlank() || LibraryIds.isFolder(key)) {
+            quickBoostBusy.set(false)
+            showBoost("Boost nicht gesendet. Keine Folge in der Wiedergabe.")
             return
         }
         scope.launch(Dispatchers.IO) {
-            val message = runCatching { boosts.quickBoost(key, position) }.fold(
-                { view ->
-                    val failed = view.lines.count { it.error }
-                    if (failed == 0) "Boost ${view.totalSats} sats gesendet."
-                    else "Boost unvollständig: $failed Empfänger nicht erreicht."
-                },
-                { CarControls.boostNotice(SecretScrub.message(it.message)) },
-            )
-            AppLog.record("Wallet", message)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@PodcastMediaLibraryService, message, Toast.LENGTH_LONG).show()
+            val message = try {
+                runCatching { boosts.quickBoost(key, position) }.fold(
+                    { boosts.outcomeText(it) },
+                    { CarControls.boostNotice(SecretScrub.message(it.message)) },
+                )
+            } finally {
+                quickBoostBusy.set(false)
             }
+            showBoost(message)
+        }
+    }
+
+    private fun showBoost(message: String) {
+        boosts.announce(message)
+        AppLog.record("Wallet", message)
+        scope.launch(Dispatchers.Main) {
+            Toast.makeText(this@PodcastMediaLibraryService, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -384,7 +463,11 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future(Dispatchers.IO) {
-            val children = runCatching { this@PodcastMediaLibraryService.browser.children(parentId) }.getOrElse { error ->
+            val automotive = packageManager.hasSystemFeature(AUTOMOTIVE)
+            val children = runCatching {
+                if (automotive && parentId == LibraryIds.ROOT) automotiveRoot()
+                else this@PodcastMediaLibraryService.browser.children(parentId)
+            }.getOrElse { error ->
                 AppLog.record("Player", "Ordner ohne Netz: ${error.message}")
                 emptyList()
             }
@@ -437,10 +520,16 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         }
     }
 
+    private suspend fun automotiveRoot(): List<MediaItem> {
+        val currentId = withContext(Dispatchers.Main) { player?.currentMediaItem?.mediaId }
+        val current = currentId?.takeIf { !LibraryIds.isFolder(it) }?.let { browser.resolvePlayable(it) }
+        return listOf(current ?: browser.emptyPlayback(), browser.browseFolder())
+    }
+
     private fun signInRequired(): LibraryResult<MediaItem> {
         val extras = Bundle()
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        if (launch != null) {
+        val launch = AutomotiveSetup.preferencesIntent(packageName)
+        if (launch.resolveActivity(packageManager) != null) {
             val pending = PendingIntent.getActivity(
                 this,
                 2,

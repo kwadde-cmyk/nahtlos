@@ -42,11 +42,11 @@ class CarControlsTest {
     @Test
     fun missingWalletOrValueGetsAVisibleAnswer() {
         assertEquals(
-            "Kein Wallet auf diesem Auto. Im Stand unter Einstellungen holen.",
+            "Boost nicht gesendet. Kein Wallet auf diesem Auto. Im Stand unter Einstellungen holen.",
             CarControls.boostNotice("Kein Wallet verbunden."),
         )
         assertEquals(
-            "Dieser Feed hat keine Empfänger. Nichts gesendet.",
+            "Boost nicht gesendet. Dieser Feed hat keine Empfänger. Nichts gesendet.",
             CarControls.boostNotice("Keine zahlbaren Empfänger."),
         )
     }

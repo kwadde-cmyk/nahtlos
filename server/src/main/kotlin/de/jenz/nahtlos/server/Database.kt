@@ -9,7 +9,11 @@ import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistResolver
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.sync.BoostRecipientSync
+import de.jenz.nahtlos.sync.BoostSync
+import de.jenz.nahtlos.sync.BoostSyncItem
 import de.jenz.nahtlos.sync.ProgressResolver
+import kotlinx.serialization.builtins.ListSerializer
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
@@ -81,6 +85,20 @@ class SyncDatabase(path: String) : AutoCloseable {
                       ciphertext TEXT,
                       created_at INTEGER NOT NULL,
                       expires_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS boosts (
+                      id TEXT PRIMARY KEY,
+                      at_ms INTEGER NOT NULL,
+                      updated_at INTEGER NOT NULL,
+                      total_sats INTEGER NOT NULL,
+                      podcast TEXT NOT NULL,
+                      episode TEXT NOT NULL,
+                      recipients_json TEXT NOT NULL,
+                      device_id TEXT NOT NULL
                     )
                     """.trimIndent(),
                 )
@@ -529,6 +547,73 @@ class SyncDatabase(path: String) : AutoCloseable {
             statement.executeUpdate()
         }
     }
+
+    fun listBoosts(since: Long?): List<BoostSyncItem> = synchronized(lock) {
+        val sql = if (since == null) {
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts ORDER BY at_ms DESC"
+        } else {
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts WHERE updated_at > ? ORDER BY at_ms DESC"
+        }
+        connection.prepareStatement(sql).use { statement ->
+            if (since != null) statement.setLong(1, since)
+            statement.executeQuery().use { rows ->
+                val list = mutableListOf<BoostSyncItem>()
+                while (rows.next()) list += rows.toBoost()
+                list
+            }
+        }
+    }
+
+    fun upsertBoost(incoming: BoostSyncItem, deviceId: String): BoostSyncItem = synchronized(lock) {
+        val current = boostById(incoming.id)
+        val chosen = BoostSync.prefer(current, incoming)
+        if (current != null && chosen.updatedAt == current.updatedAt && chosen.totalSats == current.totalSats && chosen.recipients == current.recipients) {
+            return current
+        }
+        connection.prepareStatement(
+            """
+            INSERT INTO boosts(id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, device_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              at_ms = excluded.at_ms,
+              updated_at = excluded.updated_at,
+              total_sats = excluded.total_sats,
+              podcast = excluded.podcast,
+              episode = excluded.episode,
+              recipients_json = excluded.recipients_json,
+              device_id = excluded.device_id
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, chosen.id)
+            statement.setLong(2, chosen.atMs)
+            statement.setLong(3, chosen.updatedAt)
+            statement.setLong(4, chosen.totalSats)
+            statement.setString(5, chosen.podcast.take(200))
+            statement.setString(6, chosen.episode.take(200))
+            statement.setString(7, NahtlosJson.json.encodeToString(ListSerializer(BoostRecipientSync.serializer()), chosen.recipients))
+            statement.setString(8, deviceId.take(128))
+            statement.executeUpdate()
+        }
+        chosen
+    }
+
+    private fun boostById(id: String): BoostSyncItem? =
+        connection.prepareStatement(
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts WHERE id = ?",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.toBoost() else null }
+        }
+
+    private fun java.sql.ResultSet.toBoost(): BoostSyncItem = BoostSyncItem(
+        id = getString(1),
+        atMs = getLong(2),
+        updatedAt = getLong(3),
+        totalSats = getLong(4),
+        podcast = getString(5),
+        episode = getString(6),
+        recipients = NahtlosJson.json.decodeFromString<List<de.jenz.nahtlos.sync.BoostRecipientSync>>(getString(7)),
+    )
 
     override fun close() {
         synchronized(lock) { connection.close() }

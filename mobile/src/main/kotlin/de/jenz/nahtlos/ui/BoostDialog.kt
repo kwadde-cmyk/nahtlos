@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,7 @@ import de.jenz.nahtlos.core.wallet.WalletUi
 import de.jenz.nahtlos.core.wallet.formatSats
 import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
+import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.wallet.BoostSplits
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -57,6 +59,10 @@ fun BoostDialog(
     var message by remember { mutableStateOf("") }
     var sender by remember(wallet.senderName) { mutableStateOf(wallet.senderName) }
     val amount = amountText.toLongOrNull()
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(busy, result, error) {
+        if (armed && !busy && (result != null || error != null)) armed = false
+    }
     val shares = if (amount != null && amount > 0) {
         BoostSplits.plan(amount, episodeRecipients, timeSplits, channelRecipients, positionMs)
     } else {
@@ -79,7 +85,9 @@ fun BoostDialog(
                     return@Column
                 }
                 if (result != null) {
-                    Text("${result.totalSats} sats · ${result.podcast}")
+                    val failed = result.lines.any { it.error }
+                    Text(BoostSync.outcome(failed), style = MaterialTheme.typography.headlineMedium)
+                    Text("${result.totalSats} sats · ${result.podcast}", modifier = Modifier.padding(top = 8.dp))
                     result.lines.forEach { line ->
                         Text(
                             line.text,
@@ -156,14 +164,19 @@ fun BoostDialog(
                     )
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
+                error?.let { raw ->
+                    val line = if (raw.startsWith("Boost") || raw.startsWith("Eine Zahlung")) raw else "Boost nicht gesendet. $raw"
+                    Text(line, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
+                }
             }
             if (result != null || !wallet.connected) {
                 TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 12.dp)) { Text("Schließen") }
             } else {
                 Button(
-                    enabled = !busy && amount != null && shares.isNotEmpty() && shares.sumOf { it.sats } == amount,
+                    enabled = !busy && !armed && amount != null && shares.isNotEmpty() && shares.sumOf { it.sats } == amount,
                     onClick = {
+                        if (!BoostSync.acceptTap(armed || busy)) return@Button
+                        armed = true
                         onSend(
                             BoostInput(
                                 podcastTitle = podcastTitle,

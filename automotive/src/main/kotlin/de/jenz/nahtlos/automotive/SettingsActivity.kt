@@ -444,7 +444,7 @@ private fun formatWhen(epochMs: Long?): String {
 }
 
 @Composable
-private fun AutoTheme(content: @Composable () -> Unit) {
+internal fun AutoTheme(content: @Composable () -> Unit) {
     val tone = if (isSystemInDarkTheme()) AutoPalette.dark else AutoPalette.light
     val scheme = if (isSystemInDarkTheme()) {
         darkColorScheme(

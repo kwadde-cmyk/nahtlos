@@ -49,12 +49,14 @@ object CarControls {
 
     fun boostNotice(errorMessage: String?): String {
         val text = errorMessage.orEmpty()
-        return when {
+        val body = when {
+            text.contains("läuft schon") -> "Eine Zahlung läuft schon."
             text.contains("Kein Wallet") -> "Kein Wallet auf diesem Auto. Im Stand unter Einstellungen holen."
             text.contains("Keine zahlbaren") -> "Dieser Feed hat keine Empfänger. Nichts gesendet."
-            text.isBlank() -> "Boost nicht gesendet."
+            text.isBlank() -> "Unbekannter Fehler."
             else -> text
         }
+        return if (body.startsWith("Boost ") || body.startsWith("Eine Zahlung")) body else "Boost nicht gesendet. $body"
     }
 
     private fun phoneButtons(payments: Boolean): List<CarButton> = buildList {
