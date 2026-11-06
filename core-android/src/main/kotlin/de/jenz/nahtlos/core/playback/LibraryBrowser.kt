@@ -10,6 +10,7 @@ import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.playlist.entry
 import java.net.URLDecoder
@@ -81,7 +82,7 @@ class LibraryBrowser @Inject constructor(
         return MediaItem.Builder()
             .setMediaId(entry.episodeKey)
             .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-            .setMimeType("audio/mpeg")
+            .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(entry.title.ifBlank { "Folge" })
@@ -103,7 +104,7 @@ class LibraryBrowser @Inject constructor(
             MediaItem.Builder()
                 .setMediaId(entry.episodeKey)
                 .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-                .setMimeType("audio/mpeg")
+                .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(entry.title.ifBlank { "Folge" })
@@ -184,7 +185,7 @@ class LibraryBrowser @Inject constructor(
         val builder = MediaItem.Builder()
             .setMediaId(episode.episodeKey)
             .setUri(localOrRemote(episode.episodeKey, episode.enclosureUrl))
-            .setMimeType(episode.mimeType ?: "audio/mpeg")
+            .apply { AudioSource.mediaMime(episode.mimeType, episode.enclosureUrl)?.let { setMimeType(it) } }
         val extras = episode.extras()
         val title = if (extras.live) "Live: ${episode.title}" else episode.title
         val chapterHint = episode.chaptersJson != "[]" || !episode.chaptersUrl.isNullOrBlank()

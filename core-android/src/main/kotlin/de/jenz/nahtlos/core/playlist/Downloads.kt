@@ -16,11 +16,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.db.DownloadEntity
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.playlist.DownloadCleanup
 import kotlinx.coroutines.Dispatchers
@@ -111,7 +113,7 @@ class DownloadStore @Inject constructor(
     fun existingFile(episodeKey: String): File? {
         val directory = File(context.filesDir, "downloads")
         val file = File(directory, EpisodeKeys.sha256(episodeKey) + ".bin")
-        return file.takeIf { it.isFile && it.length() > 0L }
+        return file.takeIf { AudioSource.isProgressiveAudio(it) }
     }
 
     suspend fun usedBytes(): Long = db.downloads().usedBytes()
@@ -196,6 +198,7 @@ class PlaylistDownloadWorker(
                 val progress = entry.database().progress().get(item.episodeKey)
                 if (progress?.status == ProgressStatus.COMPLETED.name) continue
                 if (store.existingFile(item.episodeKey) != null) continue
+                if (AudioSource.mediaMime(null, item.enclosureUrl) == AudioSource.HLS) continue
                 val target = File(directory, EpisodeKeys.sha256(item.episodeKey) + ".bin")
                 val partial = File(directory, target.name + ".partial")
                 val response = client.newCall(
@@ -210,12 +213,23 @@ class PlaylistDownloadWorker(
                         return@use
                     }
                     val body = bodyResponse.body ?: return@use
+                    val contentType = bodyResponse.header("Content-Type")
                     store.report(item.episodeKey, 0L, length)
+                    var rejected = false
                     try {
                         body.byteStream().use { input ->
+                            val preview = ByteArray(512)
+                            val first = input.read(preview)
+                            if (first <= 0 || !AudioSource.shouldStore(contentType, preview.copyOf(first.coerceAtLeast(0)))) {
+                                rejected = true
+                                AppLog.record("Download", "Keine Audiodatei für ${item.episodeKey}")
+                                return@use
+                            }
                             partial.outputStream().use { output ->
+                                output.write(preview, 0, first)
                                 val buffer = ByteArray(64 * 1024)
-                                var written = 0L
+                                var written = first.toLong()
+                                store.report(item.episodeKey, written, length)
                                 while (true) {
                                     val read = input.read(buffer)
                                     if (read < 0) break
@@ -227,7 +241,9 @@ class PlaylistDownloadWorker(
                         }
                     } finally {
                         store.clearTransfer(item.episodeKey)
+                        if (rejected) partial.delete()
                     }
+                    if (rejected) return@use
                     val size = partial.length()
                     if (!DownloadCleanup.canStore(store.usedBytes(), size, limit)) {
                         partial.delete()

@@ -32,6 +32,7 @@ class PlaylistRepository @Inject constructor(
     private val api: SyncClient,
     private val settings: SettingsStore,
     private val downloads: DownloadScheduler,
+    private val files: DownloadStore,
 ) {
     fun observe(): Flow<ListeningPlaylist> = db.playlist().observe().map { row ->
         row?.json?.let { decode(it) } ?: ListeningPlaylist()
@@ -39,7 +40,9 @@ class PlaylistRepository @Inject constructor(
 
     fun observePlayed(): Flow<Set<String>> = db.progress().observeCompleted().map { it.toSet() }
 
-    fun observeDownloads(): Flow<Set<String>> = db.downloads().observeKeys().map { it.toSet() }
+    fun observeDownloads(): Flow<Set<String>> = db.downloads().observeKeys().map { keys ->
+        keys.filter { files.existingFile(it) != null }.toSet()
+    }
 
     suspend fun current(): ListeningPlaylist = db.playlist().get()?.let { decode(it.json) } ?: ListeningPlaylist()
 

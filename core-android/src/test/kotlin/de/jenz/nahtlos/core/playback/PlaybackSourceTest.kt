@@ -46,9 +46,14 @@ class PlaybackSourceTest {
         assertEquals("https", uri.scheme)
         assertEquals("https://cdn.example/episode.mp3", uri.toString())
         val present = File.createTempFile("nahtlos", ".bin")
-        present.writeBytes(byteArrayOf(1))
+        present.writeBytes("ID3".toByteArray())
         val local = playbackUri(present, "https://cdn.example/episode.mp3")
         assertEquals("file", local.scheme)
+        val html = File.createTempFile("nahtlos-html", ".bin")
+        html.writeText("<html>no audio</html>")
+        val remote = playbackUri(html, "https://cdn.example/episode.m3u8")
+        assertEquals("https", remote.scheme)
         present.delete()
+        html.delete()
     }
 }

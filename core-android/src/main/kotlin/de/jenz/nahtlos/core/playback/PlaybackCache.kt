@@ -16,6 +16,7 @@ import androidx.media3.datasource.cache.SimpleCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.core.sync.SettingsStore
+import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import android.net.Uri
 import java.io.File
@@ -86,9 +87,9 @@ class PlaybackLoadPolicy : DefaultLoadErrorHandlingPolicy(2) {
     }
 }
 
-/** Prefer a readable local download. A missing file plays from the remote URL instead. */
+/** Prefer a local file only when its header is progressive audio. HTML and playlists stream instead. */
 fun playbackUri(local: File?, remote: String): Uri {
-    if (local != null && local.isFile && local.length() > 0L && local.canRead()) {
+    if (local != null && AudioSource.isProgressiveAudio(local) && local.canRead()) {
         return Uri.fromFile(local)
     }
     return Uri.parse(remote)
@@ -98,6 +99,7 @@ internal fun isLocalSourceFailure(error: Throwable): Boolean {
     var current: Throwable? = error
     while (current != null) {
         if (current is ClassCastException) return true
+        if (current.javaClass.name.endsWith("UnrecognizedInputFormatException")) return true
         val message = current.message.orEmpty()
         if ("FileURLConnection" in message) return true
         current = current.cause

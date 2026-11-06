@@ -9,6 +9,7 @@
 }
 -dontnote kotlinx.serialization.**
 -keep class kotlinx.serialization.** { *; }
+-keep class androidx.media3.exoplayer.hls.** { *; }
 -keep class org.bouncycastle.crypto.hpke.** { *; }
 -keep class org.bouncycastle.crypto.agreement.** { *; }
 -dontwarn org.bouncycastle.**
