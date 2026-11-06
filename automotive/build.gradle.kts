@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,6 +21,9 @@ val nahtlosReleaseSigning = nahtlosKeystore != null && nahtlosKeystore.isFile &&
     !nahtlosStorePassword.isNullOrBlank() &&
     !nahtlosKeyAlias.isNullOrBlank() &&
     !nahtlosKeyPassword.isNullOrBlank()
+val playVersion = Properties().apply {
+    rootProject.file("gradle/play-version.properties").inputStream().use { load(it) }
+}
 
 android {
     namespace = "de.jenz.nahtlos.automotive"
@@ -27,8 +32,8 @@ android {
         applicationId = "de.jenz.nahtlos.automotive"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = playVersion.getProperty("versionCode").trim().toInt()
+        versionName = playVersion.getProperty("versionName").trim()
         val defaultServer = (
             (project.findProperty("NAHTLOS_DEFAULT_SERVER") as String?)
                 ?: System.getenv("NAHTLOS_DEFAULT_SERVER")

@@ -228,6 +228,8 @@ Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYS
 ./gradlew :mobile:bundleRelease :automotive:bundleRelease
 ```
 
+Play-Version für beide Module: `gradle/play-version.properties`. Stand für diesen internen Upload: versionCode **2**, versionName **0.1.1** (der erste Automotive-Upload war versionCode 1 und lässt sich im neuen Track nicht noch einmal wählen). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
+
 R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
 
 ```bash
