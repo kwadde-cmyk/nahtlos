@@ -19,18 +19,18 @@ object AutoPalette {
     )
 
     val dark = Tone(
-        page = 0xFF10120F,
+        page = 0xFF0E0E10,
         onPage = 0xFFFFF8E7,
-        field = 0xFF2C3428,
+        field = 0xFF2A2A30,
         text = 0xFFFFF8E7,
         placeholder = 0xFFE4DCC4,
         label = 0xFFFFD56A,
         cursor = 0xFFFFD56A,
-        outline = 0xFFF0A202,
+        outline = 0xFFFF7A1A,
     )
 
     val light = Tone(
-        page = 0xFFF6F3EA,
+        page = 0xFFF4F1EB,
         onPage = 0xFF1A1408,
         field = 0xFFFFFFFF,
         text = 0xFF1A1408,

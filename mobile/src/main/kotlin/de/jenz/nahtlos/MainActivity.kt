@@ -10,8 +10,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -145,6 +153,45 @@ private fun AppNav() {
                 onClick = { nav.navigate("player?episode=${Uri.encode(player.episodeKey)}") },
                 onToggle = { homeViewModel.togglePlayback() },
             )
+        }
+        if (route == "home" || route == "playlist" || route == "downloads") {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                NavigationBarItem(
+                    selected = route == "home",
+                    onClick = {
+                        nav.navigate("home") {
+                            popUpTo("home") { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    },
+                    icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                    label = { Text("Bibliothek") },
+                )
+                NavigationBarItem(
+                    selected = route == "playlist",
+                    onClick = {
+                        nav.navigate("playlist") {
+                            popUpTo("home") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                    label = { Text("Playlist") },
+                )
+                NavigationBarItem(
+                    selected = route == "downloads",
+                    onClick = {
+                        nav.navigate("downloads") {
+                            popUpTo("home") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    icon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                    label = { Text("Downloads") },
+                )
+            }
         }
     }
 }

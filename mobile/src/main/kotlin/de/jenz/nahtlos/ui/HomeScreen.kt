@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -261,14 +262,8 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nahtlos") },
+                title = { Text("Bibliothek") },
                 actions = {
-                    LabeledIconButton(label = "Playlist", onClick = onOpenPlaylist) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Playlist")
-                    }
-                    LabeledIconButton(label = "Downloads", onClick = onOpenDownloads) {
-                        Icon(Icons.Filled.Download, contentDescription = "Downloads")
-                    }
                     if (selection.active) {
                         TextButton(onClick = { selection.all(podcasts.map { it.id }) }) { Text("Alle") }
                         TextButton(onClick = { confirmUnsubscribe = true }, enabled = selection.keys.isNotEmpty()) { Text("Entfernen") }
@@ -302,11 +297,16 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Podcast hinzufügen") },
-            )
+            if (!selection.active) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = { showAdd = true },
+                    containerColor = HoppOrange,
+                    contentColor = androidx.compose.ui.graphics.Color(0xFF1A0E00),
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "Podcast hinzufügen")
+                }
+            }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
@@ -327,6 +327,7 @@ fun HomeScreen(
                 else -> LibraryList(
                     continueRows = continueRows,
                     podcasts = podcasts,
+                    onOpenDownloads = onOpenDownloads,
                     onContinue = { key ->
                         viewModel.play(key)
                         onOpenPlayer(key)
@@ -456,6 +457,7 @@ private fun EmptyLibrary(onAdd: () -> Unit) {
 private fun LibraryList(
     continueRows: List<ContinueRow>,
     podcasts: List<PodcastEntity>,
+    onOpenDownloads: () -> Unit,
     onContinue: (String) -> Unit,
     onOpenPodcast: (String) -> Unit,
     onLongPressPodcast: (String) -> Unit,
@@ -467,7 +469,7 @@ private fun LibraryList(
         if (continueRows.isNotEmpty()) {
             item {
                 Text(
-                    "Weitermachen",
+                    "Als Nächstes",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
@@ -484,28 +486,79 @@ private fun LibraryList(
             }
         }
         item {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenDownloads)
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = null)
+                Text("Downloads", modifier = Modifier.padding(start = 14.dp), style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        item {
             Text(
-                "Abos",
+                "Shows",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
         }
-        items(podcasts, key = { it.id }) { podcast ->
-            SelectableRow(
-                selected = podcast.id in selected,
-                selecting = selecting,
-                onClick = { onOpenPodcast(podcast.id) },
-                onLongPress = { onLongPressPodcast(podcast.id) },
-            ) {
-            PodcastRow(
-                podcast,
-                onClick = { onOpenPodcast(podcast.id) },
-                onRetry = if (podcast.refreshStatus == FeedRefresh.FAILED && !selecting) {
-                    { onRetryFeed(podcast.id) }
-                } else {
-                    null
-                },
+        items(podcasts.chunked(3), key = { row -> row.joinToString { it.id } }) { row ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                row.forEach { podcast ->
+                    ShowTile(
+                        podcast = podcast,
+                        selected = podcast.id in selected,
+                        selecting = selecting,
+                        onClick = { onOpenPodcast(podcast.id) },
+                        onLongPress = { onLongPressPodcast(podcast.id) },
+                        onRetry = if (podcast.refreshStatus == FeedRefresh.FAILED && !selecting) {
+                            { onRetryFeed(podcast.id) }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.weight(1f).padding(6.dp),
+                    )
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShowTile(
+    podcast: PodcastEntity,
+    selected: Boolean,
+    selecting: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+    onRetry: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    SelectableRow(
+        selected = selected,
+        selecting = selecting,
+        onClick = onClick,
+        onLongPress = onLongPress,
+        modifier = modifier,
+    ) {
+        Column {
+            Artwork(
+                podcast.imageUrl,
+                podcast.title,
+                Modifier.fillMaxWidth().aspectRatio(1f),
             )
+            Text(
+                podcast.title,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (onRetry != null) {
+                TextButton(onClick = onRetry, modifier = Modifier.padding(top = 0.dp)) { Text("Erneut") }
             }
         }
     }
@@ -678,33 +731,44 @@ private fun AddFeedDialog(
 @Composable
 fun MiniPlayer(snapshot: PlayerSnapshot, onClick: () -> Unit, onToggle: () -> Unit) {
     if (snapshot.episodeKey.isNullOrBlank()) return
-    Row(
-        modifier = Modifier
+    val fraction = if (snapshot.durationMs > 0) {
+        (snapshot.positionMs.toFloat() / snapshot.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    Column(
+        Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(onClick = onClick),
     ) {
-        Artwork(snapshot.artworkUri, snapshot.title, Modifier.size(44.dp))
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(snapshot.title.ifBlank { "Wiedergabe" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                snapshot.artist,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        LabeledIconButton(
-            label = if (snapshot.isPlaying) "Pause" else "Wiedergabe",
-            onClick = onToggle,
+        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = HoppOrange)
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (snapshot.isPlaying) "Pause" else "Wiedergabe",
-            )
+            Artwork(snapshot.artworkUri, snapshot.title, Modifier.size(46.dp))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(snapshot.title.ifBlank { "Wiedergabe" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOf(snapshot.artist, "${formatClock(snapshot.positionMs)} / ${if (snapshot.durationMs > 0) formatClock(snapshot.durationMs) else "–"}")
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · "),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            LabeledIconButton(
+                label = if (snapshot.isPlaying) "Pause" else "Wiedergabe",
+                onClick = onToggle,
+            ) {
+                Icon(
+                    if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (snapshot.isPlaying) "Pause" else "Wiedergabe",
+                )
+            }
         }
     }
 }
