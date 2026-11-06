@@ -80,6 +80,7 @@ class BoostService @Inject constructor(
                 dailyBudget = store.dailyBudget(),
                 spentToday = store.spentToday(),
                 history = store.history().map { it.toView() },
+                historyEntries = store.history().map { it.toHistory() },
             )
         } catch (error: Exception) {
             WalletUi(storageError = "Die sichere Ablage ist nicht verfügbar. Der Wallet-Link wurde nicht gespeichert.")

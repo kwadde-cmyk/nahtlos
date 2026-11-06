@@ -28,6 +28,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.ui.BoostHistoryScreen
 import de.jenz.nahtlos.ui.DownloadsScreen
 import de.jenz.nahtlos.ui.EpisodesScreen
 import de.jenz.nahtlos.ui.HomeScreen
@@ -107,7 +108,10 @@ private fun AppNav() {
                     defaultValue = null
                 }),
             ) {
-                PlayerScreen(onBack = { nav.popBackStack() })
+                PlayerScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenBoosts = { nav.navigate("boosts") },
+                )
             }
             composable("downloads") {
                 DownloadsScreen(
@@ -122,7 +126,14 @@ private fun AppNav() {
                 )
             }
             composable("settings") {
-                SettingsScreen(onBack = { nav.popBackStack() }, onOpenPairing = { nav.navigate("pair") })
+                SettingsScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenPairing = { nav.navigate("pair") },
+                    onOpenBoosts = { nav.navigate("boosts") },
+                )
+            }
+            composable("boosts") {
+                BoostHistoryScreen(onBack = { nav.popBackStack() })
             }
             composable("pair") {
                 PairScreen(onBack = { nav.popBackStack() })

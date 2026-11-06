@@ -89,6 +89,7 @@ private fun HorizonChoices(selected: String, onSelect: (String) -> Unit) {
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenPairing: () -> Unit = {},
+    onOpenBoosts: () -> Unit = {},
     wide: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -140,7 +141,10 @@ fun SettingsScreen(
             )
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             if (Payments.enabled) {
-                WalletSection(onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } })
+                WalletSection(
+                    onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                    onOpenHistory = onOpenBoosts,
+                )
             }
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(

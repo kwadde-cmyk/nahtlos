@@ -64,6 +64,7 @@ fun EpisodeDossier(
     onSubscribe: (String) -> Unit,
     onUseEnclosure: (String) -> Unit,
     onBoost: () -> Unit = {},
+    onOpenBoosts: () -> Unit = {},
 ) {
     var tab by remember(details.podcastGuid, details.chapters.size, details.cues.size) {
         mutableStateOf(
@@ -91,7 +92,7 @@ fun EpisodeDossier(
         DossierTab.Chapters -> ChaptersTab(details, positionMs, onSeek)
         DossierTab.Transcript -> TranscriptTab(details, positionMs, onSeek)
         DossierTab.People -> PeopleTab(details)
-        DossierTab.Support -> SupportTab(details, onSubscribe, onBoost)
+        DossierTab.Support -> SupportTab(details, onSubscribe, onBoost, onOpenBoosts)
     }
     if (details.alternates.size > 1) {
         Text("Qualität", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
@@ -218,7 +219,12 @@ private fun PeopleTab(details: EpisodeDetails) {
 }
 
 @Composable
-private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit, onBoost: () -> Unit) {
+private fun SupportTab(
+    details: EpisodeDetails,
+    onSubscribe: (String) -> Unit,
+    onBoost: () -> Unit,
+    onOpenBoosts: () -> Unit,
+) {
     val context = LocalContext.current
     if (details.funding.isEmpty() && details.value.isEmpty() && details.podroll.isEmpty()) {
         Text("Keine Funding- oder Value-Angaben.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
@@ -243,6 +249,7 @@ private fun SupportTab(details: EpisodeDetails, onSubscribe: (String) -> Unit, o
         )
         if (Payments.enabled) {
             Button(onClick = onBoost, modifier = Modifier.padding(top = 8.dp)) { Text("Boost senden") }
+            TextButton(onClick = onOpenBoosts) { Text("Boost-Verlauf") }
         }
         if (details.timeSplits.isNotEmpty()) {
             Text(

@@ -201,7 +201,11 @@ class PlayerViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel()) {
+fun PlayerScreen(
+    onBack: () -> Unit,
+    onOpenBoosts: () -> Unit = {},
+    viewModel: PlayerViewModel = hiltViewModel(),
+) {
     val playback by viewModel.playback.collectAsStateWithLifecycle()
     val details by viewModel.details.collectAsStateWithLifecycle()
     val walletModel: WalletViewModel = hiltViewModel()
@@ -281,6 +285,7 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         TextButton(onClick = viewModel::toggleSilence) { Text("Stille") }
                         TextButton(onClick = viewModel::toggleBoost) { Text("Lauter") }
+                        TextButton(onClick = onOpenBoosts) { Text("Boosts") }
                         TextButton(onClick = { viewModel.sleepForMinutes(15) }) { Text("Schlaf 15") }
                         TextButton(onClick = viewModel::sleepAtEnd) { Text("Bis Ende") }
                         TextButton(onClick = viewModel::moreIntro) { Text("Intro +15s") }
@@ -325,6 +330,7 @@ fun PlayerScreen(onBack: () -> Unit, viewModel: PlayerViewModel = hiltViewModel(
                             walletModel.clearResult()
                             boostOpen = true
                         },
+                        onOpenBoosts = onOpenBoosts,
                     )
                     if (boostOpen) {
                         BoostDialog(

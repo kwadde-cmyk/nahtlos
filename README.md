@@ -80,7 +80,7 @@ Podcasting 2.0 im Player, in den Reitern Shownotes, Kapitel, Transkript, Persone
 
 Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Sync- und Player-Fehler schreibt `filesDir/diagnose.txt`. Beides steht unter Einstellungen → Diagnose und lässt sich teilen.
 
-Am Telefon sind die Aktionen beschriftet. Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Entfernen läuft über Wischen oder die Mehrfachauswahl, nicht über ein Papierkorb-Icon. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
+Am Telefon sind die Aktionen beschriftet. Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Entfernen, Gehört und Download laufen über langes Drücken und die Aktionsleiste, nicht über Wischen. In der Folgenliste eines Podcasts bleibt das Wischen. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
 
 ### AAOS
 
@@ -260,7 +260,7 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 ## Was diese Version kann
 
 - RSS per URL abonnieren, Folgen listen, streamen, OPML importieren (sofort die Abos, Folgen im Hintergrund) und exportieren
-- Playlist „alles seit Datum“ mit Sortierung, Ziehen am Griff, Entfernen per Wischen, Sync aufs Auto und Autoplay der nächsten Folge
+- Playlist „alles seit Datum“ mit Sortierung, Ziehen am Griff, Entfernen über die Auswahl, Sync aufs Auto und Autoplay der nächsten Folge
 - Automatischer Download der Playlist je Gerät (WLAN-Wunsch und Speicherlimit), lokale Datei vor Stream
 - Fertige Downloads nach einer Wartezeit löschen (Standard 24 Stunden) und optional aus der Playlist nehmen
 - Wiedergabe-Cache für etwa 10 Minuten Funkloch, einstellbar, mit Vorladen der aktuellen Folge im Auto

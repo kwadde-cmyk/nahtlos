@@ -55,6 +55,7 @@ import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.library.EpisodeCommands
 import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playback.PlayerConnection
+import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.ServerSettings
 import de.jenz.nahtlos.core.sync.SettingsStore
@@ -79,6 +80,7 @@ class EpisodesViewModel @Inject constructor(
     private val player: PlayerConnection,
     private val commands: EpisodeCommands,
     playlists: PlaylistRepository,
+    downloads: DownloadStore,
     settingsStore: SettingsStore,
 ) : ViewModel() {
     private val podcastId: String = checkNotNull(savedState["podcastId"])
@@ -93,6 +95,8 @@ class EpisodesViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     val downloadKeys = playlists.observeDownloads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val transfers = downloads.observeTransfers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     private val _undo = MutableSharedFlow<Reversible>(extraBufferCapacity = 1)
     val undo = _undo.asSharedFlow()
 
@@ -152,6 +156,7 @@ fun EpisodesScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
     val downloadKeys by viewModel.downloadKeys.collectAsStateWithLifecycle()
+    val transfers by viewModel.transfers.collectAsStateWithLifecycle()
     val selection = rememberSelection()
     val walletModel: WalletViewModel = hiltViewModel()
     val wallet by walletModel.state.collectAsStateWithLifecycle()
@@ -234,6 +239,7 @@ fun EpisodesScreen(
                     swipeEnd = settings.swipeEnd,
                     playlistKeys = playlistKeys,
                     downloadKeys = downloadKeys,
+                    transfers = transfers,
                     onSwipe = { action, key -> viewModel.act(action, listOf(key)) },
                     onUnsubscribe = { confirmUnsubscribe = true },
                     onBoost = {
@@ -294,6 +300,7 @@ private fun EpisodeList(
     swipeEnd: SwipeAction,
     playlistKeys: Set<String>,
     downloadKeys: Set<String>,
+    transfers: Map<String, de.jenz.nahtlos.core.playlist.DownloadTransfer>,
     onSwipe: (SwipeAction, String) -> Unit,
     onUnsubscribe: () -> Unit,
     onBoost: () -> Unit,
@@ -364,7 +371,7 @@ private fun EpisodeList(
                     onClick = { onPlay(key) },
                     onLongPress = { onLongPress(key) },
                 ) {
-                    EpisodeRowItem(row)
+                    EpisodeRowItem(row, downloadKeys, transfers)
                 }
             }
         }
@@ -377,7 +384,11 @@ private fun EpisodeList(
 }
 
 @Composable
-private fun EpisodeRowItem(row: EpisodeRow) {
+private fun EpisodeRowItem(
+    row: EpisodeRow,
+    downloadKeys: Set<String>,
+    transfers: Map<String, de.jenz.nahtlos.core.playlist.DownloadTransfer>,
+) {
     val episode = row.episode
     Column(
         modifier = Modifier
@@ -408,6 +419,11 @@ private fun EpisodeRowItem(row: EpisodeRow) {
             Text(badge, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
         }
         Text(episode.title, style = MaterialTheme.typography.titleMedium)
+        DownloadMark(
+            onDevice = episode.episodeKey in downloadKeys,
+            transfer = transfers[episode.episodeKey],
+            modifier = Modifier.padding(top = 4.dp),
+        )
         val meta = listOfNotNull(
             formatDate(episode.publishedAt).takeIf { it.isNotBlank() },
             episode.durationMs?.takeIf { it > 0 }?.let { formatClock(it) },
