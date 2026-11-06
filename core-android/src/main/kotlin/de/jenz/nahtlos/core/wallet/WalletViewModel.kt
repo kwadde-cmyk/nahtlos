@@ -3,8 +3,10 @@ package de.jenz.nahtlos.core.wallet
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.wallet.SecretScrub
 import kotlinx.coroutines.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -31,18 +33,40 @@ class WalletViewModel @Inject constructor(private val boosts: BoostService) : Vi
             .onFailure { _notice.tryEmit(SecretScrub.message(it.message)) }
     }
 
-    fun send(input: BoostInput) = launch {
-        _result.value = null
-        _error.value = null
-        runCatching { boosts.send(input) }
-            .onSuccess { _result.value = it }
-            .onFailure { _error.value = SecretScrub.message(it.message) }
+    private val sending = AtomicBoolean(false)
+
+    fun send(input: BoostInput) {
+        if (!BoostSync.acceptTap(sending.get()) || !sending.compareAndSet(false, true)) {
+            _error.value = "Eine Zahlung läuft schon."
+            return
+        }
+        viewModelScope.launch {
+            _result.value = null
+            _error.value = null
+            try {
+                runCatching { boosts.send(input) }
+                    .onSuccess { _result.value = it }
+                    .onFailure { _error.value = SecretScrub.message(it.message) }
+            } finally {
+                sending.set(false)
+            }
+        }
     }
 
-    fun retry(id: String) = launch {
-        runCatching { boosts.retry(id) }
-            .onSuccess { _result.value = it }
-            .onFailure { _notice.emit(SecretScrub.message(it.message)) }
+    fun retry(id: String) {
+        if (!BoostSync.acceptTap(sending.get()) || !sending.compareAndSet(false, true)) {
+            _error.value = "Eine Zahlung läuft schon."
+            return
+        }
+        viewModelScope.launch {
+            try {
+                runCatching { boosts.retry(id) }
+                    .onSuccess { _result.value = it }
+                    .onFailure { _notice.emit(SecretScrub.message(it.message)) }
+            } finally {
+                sending.set(false)
+            }
+        }
     }
 
     fun clearResult() {

@@ -51,5 +51,12 @@ class BoostHistoryTest {
         assertFalse(shown.contains("nostr+walletconnect"))
         assertFalse(shown.contains(preimage))
         assertFalse(shown.contains("lnbc1"))
+        val synced = payment.toSync()
+        val wire = "${synced.podcast}|${synced.episode}|${synced.recipients.joinToString { it.address + it.status }}"
+        assertFalse(wire.contains(preimage))
+        assertFalse(wire.contains("lnbc1"))
+        assertFalse(wire.contains("nostr+walletconnect"))
+        assertEquals("gesendet", synced.recipients[0].status)
+        assertEquals("fehlgeschlagen", synced.recipients[1].status)
     }
 }

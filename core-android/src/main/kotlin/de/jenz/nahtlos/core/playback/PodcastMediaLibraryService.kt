@@ -287,27 +287,39 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         }
     }.getOrNull()
 
+    private val quickBoostBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun quickBoost() {
         if (!Payments.enabled) return
+        if (!de.jenz.nahtlos.sync.BoostSync.acceptTap(quickBoostBusy.get()) || !quickBoostBusy.compareAndSet(false, true)) {
+            showBoost("Eine Zahlung läuft schon.")
+            return
+        }
         val key = player?.currentMediaItem?.mediaId
         val position = player?.currentPosition ?: 0L
-        if (key.isNullOrBlank() || de.jenz.nahtlos.core.playback.LibraryIds.isFolder(key)) {
-            AppLog.record("Wallet", "Schnell-Boost: keine Folge in der Wiedergabe.")
+        if (key.isNullOrBlank() || LibraryIds.isFolder(key)) {
+            quickBoostBusy.set(false)
+            showBoost("Boost nicht gesendet. Keine Folge in der Wiedergabe.")
             return
         }
         scope.launch(Dispatchers.IO) {
-            val message = runCatching { boosts.quickBoost(key, position) }.fold(
-                { view ->
-                    val failed = view.lines.count { it.error }
-                    if (failed == 0) "Boost ${view.totalSats} sats gesendet."
-                    else "Boost unvollständig: $failed Empfänger nicht erreicht."
-                },
-                { CarControls.boostNotice(SecretScrub.message(it.message)) },
-            )
-            AppLog.record("Wallet", message)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@PodcastMediaLibraryService, message, Toast.LENGTH_LONG).show()
+            val message = try {
+                runCatching { boosts.quickBoost(key, position) }.fold(
+                    { boosts.outcomeText(it) },
+                    { CarControls.boostNotice(SecretScrub.message(it.message)) },
+                )
+            } finally {
+                quickBoostBusy.set(false)
             }
+            showBoost(message)
+        }
+    }
+
+    private fun showBoost(message: String) {
+        boosts.announce(message)
+        AppLog.record("Wallet", message)
+        scope.launch(Dispatchers.Main) {
+            Toast.makeText(this@PodcastMediaLibraryService, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -451,7 +463,11 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future(Dispatchers.IO) {
-            val children = runCatching { this@PodcastMediaLibraryService.browser.children(parentId) }.getOrElse { error ->
+            val automotive = packageManager.hasSystemFeature(AUTOMOTIVE)
+            val children = runCatching {
+                if (automotive && parentId == LibraryIds.ROOT) automotiveRoot()
+                else this@PodcastMediaLibraryService.browser.children(parentId)
+            }.getOrElse { error ->
                 AppLog.record("Player", "Ordner ohne Netz: ${error.message}")
                 emptyList()
             }
@@ -504,10 +520,16 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         }
     }
 
+    private suspend fun automotiveRoot(): List<MediaItem> {
+        val currentId = withContext(Dispatchers.Main) { player?.currentMediaItem?.mediaId }
+        val current = currentId?.takeIf { !LibraryIds.isFolder(it) }?.let { browser.resolvePlayable(it) }
+        return listOf(current ?: browser.emptyPlayback(), browser.browseFolder())
+    }
+
     private fun signInRequired(): LibraryResult<MediaItem> {
         val extras = Bundle()
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        if (launch != null) {
+        val launch = AutomotiveSetup.preferencesIntent(packageName)
+        if (launch.resolveActivity(packageManager) != null) {
             val pending = PendingIntent.getActivity(
                 this,
                 2,

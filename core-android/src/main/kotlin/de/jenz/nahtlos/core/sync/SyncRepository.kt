@@ -13,6 +13,8 @@ import de.jenz.nahtlos.core.db.toSubscription
 import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
+import de.jenz.nahtlos.core.wallet.WalletStore
+import de.jenz.nahtlos.core.wallet.toSync
 import de.jenz.nahtlos.opml.Opml
 import de.jenz.nahtlos.opml.OpmlOutline
 import de.jenz.nahtlos.feed.EpisodeKeys
@@ -57,6 +59,7 @@ class SyncRepository @Inject constructor(
     private val outboxWork: OutboxWork,
     private val feedRefresh: FeedRefreshWork,
     private val playlists: PlaylistRepository,
+    private val wallet: WalletStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
@@ -120,6 +123,12 @@ class SyncRepository @Inject constructor(
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 error = fail("Positions-Sync", e)
+            }
+            try {
+                exchangeBoosts(current)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                AppLog.record("Sync", "Boosts: ${e.message?.take(120)}")
             }
             _status.update {
                 it.copy(
@@ -419,6 +428,12 @@ class SyncRepository @Inject constructor(
                 applyRemote(result.stored)
             }
         }
+    }
+
+    private suspend fun exchangeBoosts(current: ServerSettings) {
+        val local = wallet.history().map { it.toSync() }
+        if (local.isNotEmpty()) api.putBoosts(current, local)
+        wallet.mergeRemote(api.getBoosts(current, null))
     }
 
     private suspend fun syncProgress(current: ServerSettings) {

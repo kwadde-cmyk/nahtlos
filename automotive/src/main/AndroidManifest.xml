@@ -50,15 +50,28 @@
             Kein distractionOptimized: die Headunit sperrt die Activity während der Fahrt.
             Zusätzlich prüft ParkedGate CarUxRestrictions, falls der Bildschirm schon offen war.
         -->
+        <!--
+            Startseite ist die Wiedergabe, auch während der Fahrt.
+            Keine Textfelder. Bibliothek öffnet das Mediencenter.
+        -->
+        <activity
+            android:name=".NowPlayingActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+        </activity>
+
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|uiMode"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <category android:name="android.intent.category.DEFAULT" />

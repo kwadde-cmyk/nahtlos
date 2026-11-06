@@ -28,10 +28,8 @@ import de.jenz.nahtlos.core.wallet.WalletHandoffViewModel
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.wallet.WalletRelay
 import de.jenz.nahtlos.core.wallet.formatSats
-import java.time.Instant
+import de.jenz.nahtlos.sync.BoostSync
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.flow.collectLatest
 
 @Composable
@@ -136,8 +134,7 @@ fun WalletSection(
         if (state.history.isNotEmpty()) {
             Text("Letzte Zahlungen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             state.history.take(12).forEach { payment ->
-                val whenLabel = DateTimeFormatter.ofPattern("d. MMM HH:mm", Locale.GERMAN)
-                    .format(Instant.ofEpochMilli(payment.atMs).atZone(ZoneId.systemDefault()))
+                val whenLabel = BoostSync.formatWhen(payment.atMs, ZoneId.systemDefault())
                 Text(
                     "$whenLabel · ${payment.totalSats} sats · ${payment.podcast}",
                     style = MaterialTheme.typography.titleSmall,

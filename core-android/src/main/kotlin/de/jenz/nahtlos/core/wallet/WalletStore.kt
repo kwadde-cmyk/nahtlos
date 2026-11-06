@@ -46,6 +46,7 @@ data class StoredPayment(
     val senderName: String = "",
     val totalSats: Long,
     val splits: List<StoredSplit>,
+    val updatedAt: Long = 0,
 )
 
 data class PaymentLine(val text: String, val error: Boolean = false)
@@ -77,8 +78,9 @@ data class WalletUi(
 )
 
 /**
- * NWC-Link und Zahlungsverlauf liegen nur in EncryptedSharedPreferences.
- * Nichts davon geht an den Sync-Server, in Logcat oder in die Diagnose.
+ * Der NWC-Link liegt nur in EncryptedSharedPreferences.
+ * Der Boost-Verlauf geht ohne Link, Preimage und Invoice an den Sync-Server.
+ * Der Link selbst geht nicht an den Server, nicht ins Log und nicht in die Diagnose.
  */
 @Singleton
 class WalletStore @Inject constructor(@ApplicationContext context: Context) {
@@ -141,6 +143,48 @@ class WalletStore @Inject constructor(@ApplicationContext context: Context) {
     }
 
     fun history(): List<StoredPayment> = synchronized(lock) { decodeHistory() }
+
+    fun mergeRemote(incoming: List<de.jenz.nahtlos.sync.BoostSyncItem>) {
+        if (incoming.isEmpty()) return
+        synchronized(lock) {
+            val local = decodeHistory().associateBy { it.id }.toMutableMap()
+            for (item in incoming) {
+                val have = local[item.id]
+                val remoteUpdated = item.updatedAt
+                if (have != null && have.updatedAt > remoteUpdated && have.updatedAt > 0) continue
+                val matched = have?.splits?.associateBy { "${it.address}|${it.sats}" }.orEmpty()
+                local[item.id] = StoredPayment(
+                    id = item.id,
+                    atMs = item.atMs,
+                    podcast = item.podcast,
+                    episode = item.episode,
+                    totalSats = item.totalSats,
+                    updatedAt = remoteUpdated,
+                    senderName = have?.senderName.orEmpty(),
+                    message = "",
+                    splits = item.recipients.map { remote ->
+                        val old = matched["${remote.address}|${remote.sats}"]
+                        StoredSplit(
+                            name = remote.name,
+                            type = old?.type.orEmpty(),
+                            address = remote.address,
+                            sats = remote.sats,
+                            preimage = old?.preimage.orEmpty(),
+                            bolt11 = old?.bolt11,
+                            sent = old?.sent == true || syncStatus(remote.status) == "ok",
+                            status = syncStatus(remote.status),
+                            fee = old?.fee == true,
+                            customKey = old?.customKey,
+                            customValue = old?.customValue,
+                            feesMsat = old?.feesMsat,
+                        )
+                    },
+                )
+            }
+            val next = local.values.sortedByDescending { it.atMs }.take(80)
+            prefs.edit().putString(KEY_HISTORY, json.encodeToString(next)).apply()
+        }
+    }
 
     fun upsert(payment: StoredPayment) {
         synchronized(lock) {

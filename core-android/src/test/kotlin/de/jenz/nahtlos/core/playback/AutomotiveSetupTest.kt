@@ -16,5 +16,9 @@ class AutomotiveSetupTest {
         val launch = AutomotiveSetup.openPairing(Intent("android.intent.action.MAIN"))
         assertEquals(AutomotiveSetup.RESOLUTION_LABEL, "Handy koppeln")
         assertTrue(launch.getBooleanExtra(AutomotiveSetup.EXTRA_OPEN_PAIRING, false))
+        val settings = AutomotiveSetup.preferencesIntent("de.jenz.nahtlos.automotive")
+        assertEquals(AutomotiveSetup.SETTINGS_CLASS, settings.component?.className)
+        assertEquals(false, settings.getBooleanExtra(AutomotiveSetup.EXTRA_OPEN_PAIRING, false))
+        assertTrue(AutomotiveSetup.openPairing(settings).getBooleanExtra(AutomotiveSetup.EXTRA_OPEN_PAIRING, false))
     }
 }

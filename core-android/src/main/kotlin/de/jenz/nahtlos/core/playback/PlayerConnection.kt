@@ -161,6 +161,12 @@ class PlayerConnection @Inject constructor(
 
     fun toggleBoost() = command(SessionActions.BOOST)
 
+    fun quickBoost(): Boolean {
+        val current = controller ?: return false
+        current.sendCustomCommand(SessionCommand(SessionActions.QUICK_BOOST, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+        return true
+    }
+
     fun moreIntro() = command(SessionActions.INTRO)
 
     fun moreOutro() = command(SessionActions.OUTRO)
