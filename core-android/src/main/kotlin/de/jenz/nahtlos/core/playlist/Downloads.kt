@@ -24,6 +24,9 @@ import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.playlist.DownloadCleanup
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -87,10 +90,24 @@ class DownloadScheduler @Inject constructor(
 }
 
 @Singleton
+data class DownloadTransfer(val episodeKey: String, val written: Long, val total: Long)
+
 class DownloadStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: NahtlosDatabase,
 ) {
+    private val transfers = MutableStateFlow<Map<String, DownloadTransfer>>(emptyMap())
+
+    fun observeTransfers(): StateFlow<Map<String, DownloadTransfer>> = transfers.asStateFlow()
+
+    fun report(episodeKey: String, written: Long, total: Long) {
+        transfers.value = transfers.value + (episodeKey to DownloadTransfer(episodeKey, written, total))
+    }
+
+    fun clearTransfer(episodeKey: String) {
+        transfers.value = transfers.value - episodeKey
+    }
+
     fun existingFile(episodeKey: String): File? {
         val directory = File(context.filesDir, "downloads")
         val file = File(directory, EpisodeKeys.sha256(episodeKey) + ".bin")
@@ -192,8 +209,24 @@ class PlaylistDownloadWorker(
                         stop = true
                         return@use
                     }
-                    bodyResponse.body?.byteStream()?.use { input ->
-                        partial.outputStream().use { output -> input.copyTo(output) }
+                    val body = bodyResponse.body ?: return@use
+                    store.report(item.episodeKey, 0L, length)
+                    try {
+                        body.byteStream().use { input ->
+                            partial.outputStream().use { output ->
+                                val buffer = ByteArray(64 * 1024)
+                                var written = 0L
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    output.write(buffer, 0, read)
+                                    written += read
+                                    store.report(item.episodeKey, written, length)
+                                }
+                            }
+                        }
+                    } finally {
+                        store.clearTransfer(item.episodeKey)
                     }
                     val size = partial.length()
                     if (!DownloadCleanup.canStore(store.usedBytes(), size, limit)) {

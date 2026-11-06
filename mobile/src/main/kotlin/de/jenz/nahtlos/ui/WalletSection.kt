@@ -35,7 +35,11 @@ import java.util.Locale
 import kotlinx.coroutines.flow.collectLatest
 
 @Composable
-fun WalletSection(viewModel: WalletViewModel = hiltViewModel(), onNotice: (String) -> Unit = {}) {
+fun WalletSection(
+    viewModel: WalletViewModel = hiltViewModel(),
+    onNotice: (String) -> Unit = {},
+    onOpenHistory: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var link by remember { mutableStateOf("") }
     var sender by remember(state.senderName) { mutableStateOf(state.senderName) }
@@ -128,8 +132,9 @@ fun WalletSection(viewModel: WalletViewModel = hiltViewModel(), onNotice: (Strin
         TextButton(onClick = {
             viewModel.saveLimits(sender, defaultSats.toLongOrNull() ?: 210, budget.toLongOrNull() ?: 5000)
         }) { Text("Beträge speichern") }
+        TextButton(onClick = onOpenHistory, modifier = Modifier.padding(top = 8.dp)) { Text("Boost-Verlauf") }
         if (state.history.isNotEmpty()) {
-            Text("Zahlungen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+            Text("Letzte Zahlungen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             state.history.take(12).forEach { payment ->
                 val whenLabel = DateTimeFormatter.ofPattern("d. MMM HH:mm", Locale.GERMAN)
                     .format(Instant.ofEpochMilli(payment.atMs).atZone(ZoneId.systemDefault()))

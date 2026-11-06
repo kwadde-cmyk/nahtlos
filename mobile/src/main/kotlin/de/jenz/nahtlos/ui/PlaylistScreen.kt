@@ -43,6 +43,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import de.jenz.nahtlos.core.library.EpisodeCommands
 import de.jenz.nahtlos.core.library.Reversible
+import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.EpisodeHorizon
@@ -65,6 +66,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 class PlaylistViewModel @Inject constructor(
     private val playlists: PlaylistRepository,
     private val commands: EpisodeCommands,
+    downloadsStore: DownloadStore,
     settingsStore: SettingsStore,
 ) : ViewModel() {
     val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
@@ -73,6 +75,7 @@ class PlaylistViewModel @Inject constructor(
     val playlist = playlists.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), de.jenz.nahtlos.playlist.ListeningPlaylist())
     val played = playlists.observePlayed().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     val downloads = playlists.observeDownloads().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val transfers = downloadsStore.observeTransfers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     private val _notice = MutableStateFlow<String?>(null)
     val notice = _notice.asStateFlow()
 
@@ -95,10 +98,6 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch { playlists.reorder(keys) }
     }
 
-    fun act(action: SwipeAction, keys: List<String>) {
-        viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
-    }
-
     fun toggle(action: SwipeAction, keys: List<String>) {
         viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
     }
@@ -119,6 +118,7 @@ fun PlaylistScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val played by viewModel.played.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val transfers by viewModel.transfers.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val horizonDays = EpisodeHorizon.fromId(settings.episodeHorizonId).days ?: 28
     val selection = rememberSelection()
@@ -158,6 +158,9 @@ fun PlaylistScreen(
                         },
                         bulkLabel(SwipeAction.DELETE_DOWNLOAD, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
                             viewModel.toggle(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear()
+                        },
+                        bulkLabel(SwipeAction.DOWNLOAD, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
+                            viewModel.toggle(SwipeAction.DOWNLOAD, selection.keys.toList()); selection.clear()
                         },
                     ),
                 )
@@ -213,16 +216,15 @@ fun PlaylistScreen(
                         onCheckedChange = viewModel::setRemoveWhenFinished,
                     )
                 }
-                GestureHint(Modifier.padding(top = 4.dp))
                 if (order.isEmpty()) {
                     Text(
-                        "Noch keine Folgen. Wähle ein Datum und tippe auf „Erzeugen“, oder öffne einen Podcast und wische eine Folge zur Playlist. Langes Drücken wählt mehrere.",
+                        "Noch keine Folgen. Wähle ein Datum und tippe auf „Erzeugen“, oder öffne einen Podcast und nimm eine Folge in die Playlist. Langes Drücken wählt mehrere.",
                         modifier = Modifier.padding(top = 12.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     Text(
-                        "Am Griff links ziehen sortiert. Wischen nimmt die Folge heraus, langes Drücken wählt mehrere.",
+                        "Am Griff links ziehen sortiert. Langes Drücken startet die Auswahl, dann erscheinen Entfernen, Gehört und Download.",
                         modifier = Modifier.padding(top = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -232,15 +234,6 @@ fun PlaylistScreen(
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                 items(order, key = { it.episodeKey }) { item ->
                     ReorderableItem(reorderState, key = item.episodeKey, enabled = !selection.active) { _ ->
-                        val inPlaylist = playlist.items.any { it.episodeKey == item.episodeKey }
-                        val resolvedStart = settings.swipeStart.resolved(item.episodeKey in played, inPlaylist, item.episodeKey in downloads)
-                        val resolvedEnd = settings.swipeEnd.resolved(item.episodeKey in played, inPlaylist, item.episodeKey in downloads)
-                        SwipeRow(
-                            start = resolvedStart,
-                            end = resolvedEnd,
-                            enabled = !selection.active && !dragging.value,
-                            onAction = { viewModel.act(it, listOf(item.episodeKey)) },
-                        ) {
                             SelectableRow(
                                 selected = item.episodeKey in selection.keys,
                                 selecting = selection.active,
@@ -284,13 +277,17 @@ fun PlaylistScreen(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
+                                        DownloadMark(
+                                            onDevice = item.episodeKey in downloads,
+                                            transfer = transfers[item.episodeKey],
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
                                     }
                                     LabeledIconButton(label = "Abspielen", onClick = { onPlay(item.episodeKey) }) {
                                         Icon(Icons.Filled.PlayArrow, contentDescription = "Abspielen")
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }

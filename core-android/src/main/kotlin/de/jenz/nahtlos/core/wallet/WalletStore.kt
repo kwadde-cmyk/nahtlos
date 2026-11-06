@@ -71,6 +71,7 @@ data class WalletUi(
     val dailyBudget: Long = 5_000,
     val spentToday: Long = 0,
     val history: List<PaymentView> = emptyList(),
+    val historyEntries: List<BoostHistoryEntry> = emptyList(),
     val busy: Boolean = false,
     val storageError: String? = null,
 )
@@ -144,7 +145,7 @@ class WalletStore @Inject constructor(@ApplicationContext context: Context) {
     fun upsert(payment: StoredPayment) {
         synchronized(lock) {
             val next = listOf(payment) + decodeHistory().filterNot { it.id == payment.id }
-            prefs.edit().putString(KEY_HISTORY, json.encodeToString(next.take(40))).apply()
+            prefs.edit().putString(KEY_HISTORY, json.encodeToString(next.take(80))).apply()
         }
     }
 
