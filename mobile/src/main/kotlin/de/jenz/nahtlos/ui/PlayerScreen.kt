@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -75,7 +77,9 @@ import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.model.TranscriptLink
 import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
+import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.wallet.WalletViewModel
+import de.jenz.nahtlos.ui.HoppOrange
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -217,7 +221,7 @@ fun PlayerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Player") },
+                title = { Text(playback.artist.ifBlank { "Wiedergabe" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     LabeledIconButton(label = "Zurück", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
@@ -248,14 +252,16 @@ fun PlayerScreen(
                         playback.artworkUri,
                         playback.title,
                         Modifier
-                            .size(240.dp)
+                            .fillMaxWidth()
+                            .widthIn(max = 420.dp)
+                            .aspectRatio(1f)
                             .clip(RoundedCornerShape(28.dp))
                             .align(Alignment.CenterHorizontally),
                     )
                     Spacer(Modifier.height(20.dp))
                     Text(playback.title.ifBlank { "Folge" }, style = MaterialTheme.typography.headlineSmall)
                     if (playback.artist.isNotBlank()) {
-                        Text(playback.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(playback.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
                     }
                     val currentChapter = details.chapters.lastOrNull { playback.positionMs >= it.startMs }
                     if (currentChapter != null) {
@@ -274,25 +280,7 @@ fun PlayerScreen(
                     }
                     SeekRow(playback.positionMs, playback.durationMs, viewModel::seekTo)
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = { viewModel.nudgeSpeed(-1) }) { Text("−0,1×") }
-                        Text("${"%.1f".format(playback.speed)}×", style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { viewModel.nudgeSpeed(1) }) { Text("+0,1×") }
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        TextButton(onClick = viewModel::toggleSilence) { Text("Stille") }
-                        TextButton(onClick = viewModel::toggleBoost) { Text("Lauter") }
-                        TextButton(onClick = onOpenBoosts) { Text("Boosts") }
-                        TextButton(onClick = { viewModel.sleepForMinutes(15) }) { Text("Schlaf 15") }
-                        TextButton(onClick = viewModel::sleepAtEnd) { Text("Bis Ende") }
-                        TextButton(onClick = viewModel::moreIntro) { Text("Intro +15s") }
-                        TextButton(onClick = viewModel::moreOutro) { Text("Outro +15s") }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -300,7 +288,7 @@ fun PlayerScreen(
                         LabeledFilledIconButton(
                             label = if (playback.isPlaying) "Pause" else "Wiedergabe",
                             onClick = viewModel::toggle,
-                            modifier = Modifier.size(72.dp).padding(horizontal = 12.dp),
+                            modifier = Modifier.size(84.dp).padding(horizontal = 18.dp),
                         ) {
                             if (playback.buffering) {
                                 CircularProgressIndicator(
@@ -316,6 +304,36 @@ fun PlayerScreen(
                             }
                         }
                         IconTextButton(label = "Vor", icon = Icons.AutoMirrored.Filled.Forward, onClick = viewModel::seekForward)
+                    }
+                    if (Payments.enabled) {
+                        Button(
+                            onClick = {
+                                walletModel.clearResult()
+                                boostOpen = true
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp),
+                            shape = RoundedCornerShape(26.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = HoppOrange,
+                                contentColor = androidx.compose.ui.graphics.Color(0xFF1A0E00),
+                            ),
+                        ) { Text("Boost") }
+                        TextButton(onClick = onOpenBoosts, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                            Text("Boosts")
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        TextButton(onClick = { viewModel.nudgeSpeed(-1) }) { Text("−0,1×") }
+                        Text("${"%.1f".format(playback.speed)}×", style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { viewModel.nudgeSpeed(1) }) { Text("+0,1×") }
+                        TextButton(onClick = viewModel::toggleSilence) { Text("Stille") }
+                        TextButton(onClick = viewModel::toggleBoost) { Text("Lauter") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        TextButton(onClick = { viewModel.sleepForMinutes(15) }) { Text("Schlaf 15") }
+                        TextButton(onClick = viewModel::sleepAtEnd) { Text("Bis Ende") }
+                        TextButton(onClick = viewModel::moreIntro) { Text("Intro +15s") }
+                        TextButton(onClick = viewModel::moreOutro) { Text("Outro +15s") }
                     }
                     playback.error?.let { message ->
                         Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))

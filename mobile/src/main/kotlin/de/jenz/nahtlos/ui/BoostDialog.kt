@@ -1,17 +1,24 @@
 package de.jenz.nahtlos.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +34,7 @@ import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
 import de.jenz.nahtlos.wallet.BoostSplits
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun BoostDialog(
     podcastTitle: String,
@@ -55,11 +62,18 @@ fun BoostDialog(
     } else {
         emptyList()
     }
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(if (episodeTitle.isNullOrBlank()) "Boost für $podcastTitle" else "Boost") },
-        text = {
-            Column {
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+            Text(
+                if (episodeTitle.isNullOrBlank()) "Boost an $podcastTitle" else "Boost an $podcastTitle",
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            if (!episodeTitle.isNullOrBlank()) {
+                Text(episodeTitle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            }
                 if (!wallet.connected) {
                     Text("Unter Einstellungen → Wallet & Zahlungen den NWC-Link von Alby Hub einfügen. Ohne Verbindung wird nichts gesendet.")
                     return@Column
@@ -81,15 +95,25 @@ fun BoostDialog(
                     }
                     return@Column
                 }
-                Text("Vorschläge, oder ein eigener Betrag. Heute ${wallet.spentToday} von ${wallet.dailyBudget} sats.")
-                FlowRow(modifier = Modifier.padding(top = 8.dp)) {
-                    listOf(21L, 210L, 2100L).forEach { suggestion ->
-                        FilterChip(
-                            selected = amount == suggestion,
-                            onClick = { amountText = suggestion.toString() },
-                            label = { Text("$suggestion") },
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
+                Text(
+                    "Heute ${wallet.spentToday} von ${wallet.dailyBudget} sats übrig.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                FlowRow(modifier = Modifier.padding(top = 12.dp)) {
+                    listOf(21L, 210L, 1000L, 2100L).forEach { suggestion ->
+                        val chosen = amount == suggestion
+                        Surface(
+                            modifier = Modifier.padding(end = 8.dp, bottom = 8.dp).clickable { amountText = suggestion.toString() },
+                            shape = RoundedCornerShape(24.dp),
+                            color = if (chosen) HoppOrange else MaterialTheme.colorScheme.secondaryContainer,
+                        ) {
+                            Text(
+                                "$suggestion",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                color = if (chosen) Color(0xFF1A0E00) else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -102,23 +126,27 @@ fun BoostDialog(
                 OutlinedTextField(
                     value = message,
                     onValueChange = { message = it.take(200) },
-                    label = { Text("Boostagram, optional") },
+                    label = { Text("Nachricht (optional)") },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 OutlinedTextField(
                     value = sender,
                     onValueChange = { sender = it.take(40) },
-                    label = { Text("Absendername") },
+                    label = { Text("Dein Name (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 if (shares.isEmpty()) {
                     Text("Keine zahlbaren Empfänger für diesen Zeitpunkt.", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                 } else {
-                    Text("Aufteilung, ganze Sats", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                    Text(
+                        "Aufteilung laut Feed · ${shares.size} Empfänger",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                     shares.forEach { share ->
                         val fee = if (share.fee) " · Gebühr" else ""
-                        Text("${share.name} · ${share.sats} sats · ${share.type}$fee")
+                        Text("${share.name.ifBlank { share.address }} · ${share.sats} sats$fee")
                     }
                     Text(
                         "Routing-Gebühren kommen danach extra dazu und stecken nicht in diesen Beträgen.",
@@ -130,12 +158,10 @@ fun BoostDialog(
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
             }
-        },
-        confirmButton = {
             if (result != null || !wallet.connected) {
-                TextButton(onClick = onDismiss) { Text("Schließen") }
+                TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 12.dp)) { Text("Schließen") }
             } else {
-                TextButton(
+                Button(
                     enabled = !busy && amount != null && shares.isNotEmpty() && shares.sumOf { it.sats } == amount,
                     onClick = {
                         onSend(
@@ -149,19 +175,17 @@ fun BoostDialog(
                                 episodeRecipients = episodeRecipients,
                                 timeSplits = timeSplits,
                                 channelRecipients = channelRecipients,
-                                amountSats = amount ?: return@TextButton,
+                                amountSats = amount ?: return@Button,
                                 message = message,
                                 senderName = sender,
                             ),
                         )
                     },
-                ) { Text("Senden") }
-            }
-        },
-        dismissButton = {
-            if (result == null && wallet.connected) {
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = HoppOrange, contentColor = Color(0xFF1A0E00)),
+                ) { Text("${amount ?: 0} sats boosten") }
                 TextButton(enabled = !busy, onClick = onDismiss) { Text("Abbrechen") }
             }
-        },
-    )
-}
+        }
+    }
