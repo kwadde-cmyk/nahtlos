@@ -111,7 +111,7 @@ fun GestureHint(modifier: Modifier = Modifier.padding(horizontal = 20.dp, vertic
     if (seen) return
     Column(modifier) {
         Text(
-            "Wischen markiert eine Folge oder nimmt sie aus der Liste. Langes Drücken wählt mehrere. Die Wischrichtung steht in den Einstellungen.",
+            "In der Folgenliste wischt du nach rechts für Gehört und nach links für die Playlist. Langes Drücken wählt mehrere. Die Playlist selbst hat kein Wischen.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

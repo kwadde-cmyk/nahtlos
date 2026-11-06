@@ -34,8 +34,6 @@ data class SettingsUi(
     val playbackSpeed: Float = PlaybackTuning.DEFAULT_SPEED,
     val skipBackSec: Int = PlaybackTuning.DEFAULT_SKIP_BACK_SEC,
     val skipForwardSec: Int = PlaybackTuning.DEFAULT_SKIP_FORWARD_SEC,
-    val swipeStart: de.jenz.nahtlos.playback.SwipeAction = de.jenz.nahtlos.playback.SwipeAction.START_DEFAULT,
-    val swipeEnd: de.jenz.nahtlos.playback.SwipeAction = de.jenz.nahtlos.playback.SwipeAction.END_DEFAULT,
     val podcastIndexKey: String = "",
     val podcastIndexSecret: String = "",
     val message: String? = null,
@@ -64,8 +62,6 @@ class SettingsViewModel @Inject constructor(
             playbackSpeed = stored.playbackSpeed,
             skipBackSec = stored.skipBackSec,
             skipForwardSec = stored.skipForwardSec,
-            swipeStart = stored.swipeStart,
-            swipeEnd = stored.swipeEnd,
             podcastIndexKey = stored.podcastIndexKey,
             podcastIndexSecret = stored.podcastIndexSecret,
             message = status.lastError,
@@ -85,8 +81,6 @@ class SettingsViewModel @Inject constructor(
                 playbackSpeed = it.playbackSpeed,
                 skipBackSec = it.skipBackSec,
                 skipForwardSec = it.skipForwardSec,
-                swipeStart = it.swipeStart,
-                swipeEnd = it.swipeEnd,
                 podcastIndexKey = it.podcastIndexKey,
                 podcastIndexSecret = it.podcastIndexSecret,
             )
@@ -161,18 +155,6 @@ class SettingsViewModel @Inject constructor(
             podcastIndexSecret = secret.trim(),
         )
         _notice.tryEmit(if (key.isBlank() || secret.isBlank()) "Podcast-Index-Suche aus" else "Podcast-Index-Schlüssel gespeichert")
-    }
-
-    fun setSwipe(start: Boolean, id: String) {
-        val current = settings.read()
-        val action = de.jenz.nahtlos.playback.SwipeAction.fromId(id)
-        settings.save(
-            serverUrl = current.serverUrl,
-            token = current.token,
-            bufferAheadMinutes = current.bufferAheadMinutes,
-            swipeStart = if (start) action else current.swipeStart,
-            swipeEnd = if (start) current.swipeEnd else action,
-        )
     }
 
     fun setEpisodeHorizon(id: String) {

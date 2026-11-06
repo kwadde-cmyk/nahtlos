@@ -32,7 +32,6 @@ import de.jenz.nahtlos.core.library.EpisodeCommands
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playlist.DownloadStore
-import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.playback.SwipeAction
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,10 +46,8 @@ class DownloadsViewModel @Inject constructor(
     downloads: DownloadStore,
     private val commands: EpisodeCommands,
     playlists: PlaylistRepository,
-    settingsStore: SettingsStore,
 ) : ViewModel() {
     val rows = downloads.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
     val playlistKeys = playlists.observe().map { playlist -> playlist.items.map { it.episodeKey }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     val played = playlists.observePlayed()
@@ -75,7 +72,6 @@ fun DownloadsScreen(
     viewModel: DownloadsViewModel = hiltViewModel(),
 ) {
     val rows by viewModel.rows.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
     val played by viewModel.played.collectAsStateWithLifecycle()
     val downloaded = rows.map { it.episodeKey }.toSet()
@@ -140,7 +136,7 @@ fun DownloadsScreen(
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 item { GestureHint() }
                 items(rows, key = { it.episodeKey }) { row ->
-                    DownloadLine(row, settings.swipeStart, settings.swipeEnd, selection, playlistKeys, played, onPlay, viewModel::act)
+                    DownloadLine(row, SwipeAction.START_DEFAULT, SwipeAction.END_DEFAULT, selection, playlistKeys, played, onPlay, viewModel::act)
                 }
             }
         }

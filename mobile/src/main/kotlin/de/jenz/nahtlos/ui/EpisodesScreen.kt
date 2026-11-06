@@ -57,8 +57,6 @@ import de.jenz.nahtlos.core.library.Reversible
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.playlist.DownloadStore
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
-import de.jenz.nahtlos.core.sync.ServerSettings
-import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
 import de.jenz.nahtlos.playback.SwipeAction
 import kotlinx.coroutines.CancellationException
@@ -81,7 +79,6 @@ class EpisodesViewModel @Inject constructor(
     private val commands: EpisodeCommands,
     playlists: PlaylistRepository,
     downloads: DownloadStore,
-    settingsStore: SettingsStore,
 ) : ViewModel() {
     private val podcastId: String = checkNotNull(savedState["podcastId"])
     val podcast = feeds.observePodcast(podcastId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -90,7 +87,6 @@ class EpisodesViewModel @Inject constructor(
     val refreshing = _refreshing.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
-    val settings = settingsStore.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), settingsStore.read())
     val playlistKeys = playlists.observe().map { playlist -> playlist.items.map { it.episodeKey }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
     val downloadKeys = playlists.observeDownloads()
@@ -153,7 +149,6 @@ fun EpisodesScreen(
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val playlistKeys by viewModel.playlistKeys.collectAsStateWithLifecycle()
     val downloadKeys by viewModel.downloadKeys.collectAsStateWithLifecycle()
     val transfers by viewModel.transfers.collectAsStateWithLifecycle()
@@ -235,8 +230,8 @@ fun EpisodesScreen(
                     onLongPress = { key -> selection.start(key) },
                     selecting = selection.active,
                     selected = selection.keys,
-                    swipeStart = settings.swipeStart,
-                    swipeEnd = settings.swipeEnd,
+                    swipeStart = SwipeAction.START_DEFAULT,
+                    swipeEnd = SwipeAction.END_DEFAULT,
                     playlistKeys = playlistKeys,
                     downloadKeys = downloadKeys,
                     transfers = transfers,
