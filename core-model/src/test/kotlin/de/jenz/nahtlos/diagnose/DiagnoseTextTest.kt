@@ -18,4 +18,14 @@ class DiagnoseTextTest {
         assertEquals(null, DiagnoseText.reject(clean))
         assertEquals("Wallet-Link", DiagnoseText.reject("siehe nostr+walletconnect://aa"))
     }
+
+    @Test
+    fun publicLocationDropsQueryAndUserInfo() {
+        val location = DiagnoseText.publicLocation(
+            "https://user:secret@assets.podhome.fm/24263e26/file.mp3?token=geheim",
+        )
+        assertEquals("assets.podhome.fm/24263e26/file.mp3", location)
+        assertFalse(location.contains("geheim"))
+        assertFalse(location.contains("secret"))
+    }
 }

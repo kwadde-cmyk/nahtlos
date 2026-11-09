@@ -24,8 +24,10 @@ import de.jenz.nahtlos.model.TranscriptCue
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.ChapterJsonParser
 import de.jenz.nahtlos.feed.EpisodeHorizon
+import de.jenz.nahtlos.feed.EnclosurePolicy
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.feed.RssFeedParser
+import de.jenz.nahtlos.core.AppLog
 import javax.inject.Provider
 import de.jenz.nahtlos.opml.Opml
 import de.jenz.nahtlos.opml.OpmlOutline
@@ -107,6 +109,23 @@ class FeedRepository @Inject constructor(
         db.podcasts().requeue(id)
     }
 
+    /**
+     * Folgen, deren gespeicherte Adresse keine Audiodatei ist (etwa eine YouTube-URI aus
+     * alternateEnclosure), werden neu aus dem Feed gelesen. Die MP3 steht nicht mehr in Room,
+     * deshalb reicht eine SQL-Migration nicht.
+     */
+    suspend fun requeueUnplayable(): Int = withContext(Dispatchers.IO) {
+        val ids = db.episodes().enclosureRefs()
+            .filter { !EnclosurePolicy.isPlayable(it.enclosureUrl, null) }
+            .map { it.podcastId }
+            .distinct()
+        ids.forEach { db.podcasts().requeue(it) }
+        if (ids.isNotEmpty()) {
+            AppLog.record("Feed", "${ids.size} Abos werden neu gelesen, weil eine Enclosure keine Audiodatei ist.")
+        }
+        ids.size
+    }
+
     suspend fun markFailed(id: String, message: String?) = withContext(Dispatchers.IO) {
         db.podcasts().setRefresh(id, FeedRefresh.FAILED, message?.take(180) ?: "Feed konnte nicht geladen werden")
     }
@@ -178,6 +197,7 @@ class FeedRepository @Inject constructor(
         if (url.isBlank()) return@withContext
         val episode = db.episodes().get(episodeKey) ?: return@withContext
         val mime = episode.extras().alternates.firstOrNull { it.url == url }?.type ?: episode.mimeType
+        if (!EnclosurePolicy.isPlayable(url, mime)) return@withContext
         db.episodes().updateEnclosure(episodeKey, url, mime)
     }
 

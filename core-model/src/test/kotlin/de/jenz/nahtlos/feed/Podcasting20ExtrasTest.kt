@@ -20,7 +20,9 @@ class Podcasting20ExtrasTest {
         val episode = feed.episodes.single { it.title == "Folge 1" }
         assertEquals(2, episode.season)
         assertEquals("5", episode.episodeNumber)
-        assertEquals("https://cdn.example/hq.mp3", episode.enclosureUrl)
+        assertEquals("https://cdn.example/low.mp3", episode.enclosureUrl)
+        assertEquals("audio/mpeg", episode.mimeType)
+        assertTrue(episode.alternates.any { it.url == "https://cdn.example/hq.mp3" && it.type == "audio/mpeg" })
         assertEquals(73_000L, episode.soundbites.single().startMs)
         assertEquals("Bob", episode.value.single().name)
         assertEquals(true, episode.value.single().fee)

@@ -219,22 +219,19 @@ class RssFeedParser(
                             "updated" -> if (pubDate == null) pubDate = text()
                             "enclosure" -> {
                                 val bitrate = attr("bitrate")?.toIntOrNull() ?: 0
-                                if (bitrate >= bestBitrate || enclosureUrl == null) {
-                                    enclosureUrl = attr("url")
-                                    mimeType = attr("type")
+                                val url = attr("url")
+                                val type = attr("type")
+                                if (EnclosurePolicy.shouldKeepEnclosure(url, type, bitrate, enclosureUrl, bestBitrate)) {
+                                    enclosureUrl = url
+                                    mimeType = type
                                     bestBitrate = bitrate
                                 }
                                 skip()
                             }
                             "alternateEnclosure" -> {
                                 val choice = alternateEnclosure()
-                                if (choice != null) {
+                                if (choice != null && EnclosurePolicy.isAudioFallback(choice.url, choice.type)) {
                                     alternates += AlternateSource(choice.url, choice.type, choice.bitrate)
-                                    if (choice.bitrate >= bestBitrate || enclosureUrl == null) {
-                                        enclosureUrl = choice.url
-                                        mimeType = choice.type
-                                        bestBitrate = choice.bitrate
-                                    }
                                 }
                             }
                             "soundbite" -> soundbite()?.let { soundbites += it }
@@ -252,9 +249,14 @@ class RssFeedParser(
                             "txt" -> txtTag()?.let { txt += it }
                             "link" -> {
                                 val href = attr("href")
-                                if (attr("rel") == "enclosure" && !href.isNullOrBlank()) {
+                                val type = attr("type")
+                                if (
+                                    attr("rel") == "enclosure" &&
+                                    enclosureUrl == null &&
+                                    EnclosurePolicy.isPlayable(href, type)
+                                ) {
                                     enclosureUrl = href
-                                    mimeType = attr("type") ?: mimeType
+                                    mimeType = type ?: mimeType
                                 }
                                 skip()
                             }
@@ -281,14 +283,14 @@ class RssFeedParser(
                     XmlPullParser.END_DOCUMENT -> break
                 }
             }
-            val url = enclosureUrl ?: return null
+            val chosen = EnclosurePolicy.choose(enclosureUrl, mimeType, alternates, bestBitrate) ?: return null
             val rawHtml = encoded.ifBlank { description }.ifBlank { summary }
             return ParsedEpisode(
                 title = title.ifBlank { "Ohne Titel" },
                 description = plainText(rawHtml),
                 guid = guid,
-                enclosureUrl = url,
-                mimeType = mimeType,
+                enclosureUrl = chosen.url,
+                mimeType = chosen.type,
                 durationMs = parseDuration(duration.orEmpty()),
                 publishedAtEpochMs = parseDate(pubDate.orEmpty()),
                 imageUrl = image ?: channelImage,
@@ -307,10 +309,7 @@ class RssFeedParser(
                 valueMethod = valueMethod,
                 valueSuggested = valueSuggested,
                 valueTimeSplits = timeSplits,
-                alternates = if (enclosureUrl == null) alternates else {
-                    if (alternates.any { it.url == enclosureUrl }) alternates
-                    else listOf(AlternateSource(enclosureUrl, mimeType, bestBitrate.coerceAtLeast(0))) + alternates
-                },
+                alternates = chosen.sources,
                 location = location,
                 license = license,
                 txt = txt,

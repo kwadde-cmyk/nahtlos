@@ -29,6 +29,22 @@ object DiagnoseText {
         .replace(preimage, "$1[entfernt]")
         .take(MAX_CHARS)
 
+    /** Host und Pfad, ohne Schema, Nutzerinfo und Query. Für die Diagnose bei Source error. */
+    fun publicLocation(url: String): String {
+        val clean = scrub(url).substringBefore('#').substringBefore('?').trim()
+        val rest = when {
+            clean.startsWith("https://") -> clean.removePrefix("https://")
+            clean.startsWith("http://") -> clean.removePrefix("http://")
+            else -> return clean.take(180).ifBlank { "unbekannt" }
+        }
+        val authority = rest.substringBefore('/')
+        val named = if ('@' in authority) authority.substringAfterLast('@') else authority
+        val host = named.substringBefore(':')
+        val path = rest.substringAfter('/', "")
+        val location = if (path.isEmpty()) host else "$host/$path"
+        return location.trimEnd('/').take(180).ifBlank { "unbekannt" }
+    }
+
     fun reject(body: String): String? {
         if (body.length > MAX_CHARS) return "zu lang"
         val folded = body.lowercase()

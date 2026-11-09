@@ -57,6 +57,14 @@ class PlaybackCache @Inject constructor(
         }
     }
 
+    fun discard(url: String) {
+        if (url.isBlank()) return
+        synchronized(lock) {
+            val current = cache ?: return
+            runCatching { current.removeResource(url) }
+        }
+    }
+
     private fun simpleCache(): SimpleCache {
         synchronized(lock) {
             cache?.let { return it }

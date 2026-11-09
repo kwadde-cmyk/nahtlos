@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.playlist
 
+import de.jenz.nahtlos.feed.EnclosurePolicy
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -162,7 +163,24 @@ object PlaylistEditor {
         val fresh = generated.values
             .filter { it.episodeKey !in keptKeys }
             .sortedWith(entryComparator(sort))
-        return kept + fresh
+        return realignEnclosures(kept + fresh, candidates.associate { it.episodeKey to it.enclosureUrl })
+    }
+
+    /**
+     * Ersetzt eine gespeicherte Adresse, die keine Audiodatei ist, durch die Enclosure aus dem Feed.
+     * Eine bereits spielbare Adresse bleibt, damit eine bewusst gewählte Audio-Qualität nicht verloren geht.
+     */
+    fun realignEnclosures(items: List<PlaylistEntry>, enclosureByKey: Map<String, String>): List<PlaylistEntry> {
+        if (items.isEmpty() || enclosureByKey.isEmpty()) return items
+        return items.map { entry ->
+            val fresh = enclosureByKey[entry.episodeKey]?.takeIf { it.isNotBlank() } ?: return@map entry
+            if (fresh == entry.enclosureUrl) return@map entry
+            if (!EnclosurePolicy.isPlayable(entry.enclosureUrl, null) && EnclosurePolicy.isPlayable(fresh, null)) {
+                entry.copy(enclosureUrl = fresh)
+            } else {
+                entry
+            }
+        }
     }
 
     fun resort(items: List<PlaylistEntry>, sort: PlaylistSort): List<PlaylistEntry> =
