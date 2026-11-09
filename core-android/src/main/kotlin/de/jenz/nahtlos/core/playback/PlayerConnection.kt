@@ -137,6 +137,7 @@ class PlayerConnection @Inject constructor(
     }
 
     fun toggle() {
+        PlaybackNotice.clear()
         val current = controller ?: return
         if (current.isPlaying) current.pause() else current.play()
     }
@@ -217,6 +218,7 @@ class PlayerConnection @Inject constructor(
             current.pause()
         }
         val failure = current.playerError?.let { it.message ?: "Wiedergabe fehlgeschlagen" }
+        val notice = PlaybackNotice.text.value
         _state.update {
             val playing = current.isPlaying || current.playbackState == Player.STATE_READY
             it.copy(
@@ -230,7 +232,7 @@ class PlayerConnection @Inject constructor(
                 positionMs = position,
                 durationMs = duration,
                 speed = current.playbackParameters.speed,
-                error = failure ?: if (playing) null else it.error,
+                error = failure ?: notice ?: if (playing) null else it.error,
             )
         }
     }

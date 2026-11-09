@@ -10,6 +10,12 @@
 -dontnote kotlinx.serialization.**
 -keep class kotlinx.serialization.** { *; }
 -keep class androidx.media3.exoplayer.hls.** { *; }
+-keep class androidx.media3.extractor.** { *; }
+-keep class androidx.media3.container.** { *; }
+-keep class androidx.media3.datasource.** { *; }
+-keep class androidx.media3.database.** { *; }
+-keep class com.google.common.collect.** { *; }
+-keep class com.google.common.util.concurrent.** { *; }
 -keep class org.bouncycastle.crypto.hpke.** { *; }
 -keep class org.bouncycastle.crypto.agreement.** { *; }
 -dontwarn org.bouncycastle.**

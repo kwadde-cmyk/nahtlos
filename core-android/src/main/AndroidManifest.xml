@@ -23,6 +23,13 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
+            <!--
+                AAOS 15 (Volvo 2026) öffnet nur Apps mit diesem Opt-in im Mediencenter.
+                Ohne das Flag bleibt die Fläche leer und nur das Icon steht oben links.
+            -->
+            <meta-data
+                android:name="androidx.car.app.launchable"
+                android:value="true" />
             <intent-filter>
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />

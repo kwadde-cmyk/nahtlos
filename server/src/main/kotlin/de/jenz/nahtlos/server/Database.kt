@@ -9,6 +9,7 @@ import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistResolver
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.diagnose.DiagnoseNote
 import de.jenz.nahtlos.sync.BoostRecipientSync
 import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.sync.BoostSyncItem
@@ -85,6 +86,15 @@ class SyncDatabase(path: String) : AutoCloseable {
                       ciphertext TEXT,
                       created_at INTEGER NOT NULL,
                       expires_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS diagnose (
+                      device_id TEXT PRIMARY KEY,
+                      updated_at INTEGER NOT NULL,
+                      body TEXT NOT NULL
                     )
                     """.trimIndent(),
                 )
@@ -545,6 +555,42 @@ class SyncDatabase(path: String) : AutoCloseable {
         connection.prepareStatement("DELETE FROM wallet_relay WHERE session_id = ?").use { statement ->
             statement.setString(1, sessionId)
             statement.executeUpdate()
+        }
+    }
+
+    fun listDiagnose(): List<DiagnoseNote> = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT device_id, updated_at, body FROM diagnose ORDER BY updated_at DESC",
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                val list = mutableListOf<DiagnoseNote>()
+                while (rows.next()) {
+                    list += DiagnoseNote(rows.getString(1), rows.getLong(2), rows.getString(3))
+                }
+                list
+            }
+        }
+    }
+
+    fun saveDiagnose(deviceId: String, updatedAt: Long, body: String) {
+        synchronized(lock) {
+        val id = deviceId.take(128)
+        val existing = connection.prepareStatement("SELECT updated_at FROM diagnose WHERE device_id = ?").use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows -> if (rows.next()) rows.getLong(1) else null }
+        }
+        if (existing != null && existing > updatedAt) return@synchronized
+        connection.prepareStatement(
+            """
+            INSERT INTO diagnose(device_id, updated_at, body) VALUES (?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET updated_at = excluded.updated_at, body = excluded.body
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.setLong(2, updatedAt)
+            statement.setString(3, body.take(20_000))
+            statement.executeUpdate()
+        }
         }
     }
 

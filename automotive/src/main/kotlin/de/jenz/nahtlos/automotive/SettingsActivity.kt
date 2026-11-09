@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.SettingsViewModel
@@ -108,11 +109,14 @@ private fun CarSettings(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
+    var diagnose by remember { mutableStateOf<String?>(null) }
+    val remote by viewModel.remoteDiagnose.collectAsStateWithLifecycle()
     var nav by remember { mutableStateOf(AutoNav.initial(openPairing)) }
     val leave = { MediaCenterExit.open(context) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
         crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
+        diagnose = withContext(Dispatchers.IO) { AppLog.read(context) }
     }
     LaunchedEffect(viewModel) {
         viewModel.notice.collectLatest { snackbar.showSnackbar(it) }
@@ -364,6 +368,44 @@ private fun CarSettings(
             )
             state.message?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Diagnose", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Fehler von Playlist und Bibliothek stehen hier. Geparkt teilen oder auf den Server legen, dann am Handy unter Diagnose „Vom Auto holen“.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (diagnose.isNullOrBlank()) {
+                Text("Noch nichts protokolliert.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            } else {
+                SelectionContainer {
+                    Text(
+                        diagnose.orEmpty(),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 12,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Row {
+                    androidx.compose.material3.TextButton(onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Nahtlos Diagnose")
+                            putExtra(Intent.EXTRA_TEXT, diagnose)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
+                    }) { Text("Teilen") }
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.pushDiagnose(diagnose.orEmpty())
+                    }) { Text("Ans Handy schicken") }
+                }
+            }
+            androidx.compose.material3.TextButton(onClick = viewModel::pullDiagnose) { Text("Vom anderen Gerät holen") }
+            remote?.let { text ->
+                SelectionContainer {
+                    Text(text, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, maxLines = 12)
+                }
             }
             Spacer(Modifier.height(16.dp))
             Text("Letzter Absturz", style = MaterialTheme.typography.titleSmall)

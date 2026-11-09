@@ -18,6 +18,8 @@ import de.jenz.nahtlos.model.WalletCipherRequest
 import de.jenz.nahtlos.model.WalletOpenRequest
 import de.jenz.nahtlos.model.WalletOpenResponse
 import de.jenz.nahtlos.model.WalletPollResponse
+import de.jenz.nahtlos.diagnose.DiagnoseNote
+import de.jenz.nahtlos.diagnose.DiagnoseUpload
 import de.jenz.nahtlos.sync.BoostBatchRequest
 import de.jenz.nahtlos.sync.BoostSyncItem
 import de.jenz.nahtlos.model.NahtlosJson
@@ -154,6 +156,13 @@ class SyncClient @Inject constructor(
         val id = URLEncoder.encode(sessionId, Charsets.UTF_8.name())
         authed(settings, "/v1/wallet-relay/$id/cipher", "POST", json.encodeToString(WalletCipherRequest(ciphertext)))
     }
+
+    suspend fun putDiagnose(settings: ServerSettings, upload: DiagnoseUpload) {
+        authed(settings, "/v1/diagnose", "PUT", json.encodeToString(upload))
+    }
+
+    suspend fun getDiagnose(settings: ServerSettings): List<DiagnoseNote> =
+        json.decodeFromString(authed(settings, "/v1/diagnose", "GET", null))
 
     suspend fun putBoosts(settings: ServerSettings, items: List<BoostSyncItem>): List<BoostSyncItem> {
         val result = authed(settings, "/v1/boosts", "PUT", json.encodeToString(BoostBatchRequest(items.take(80))))
