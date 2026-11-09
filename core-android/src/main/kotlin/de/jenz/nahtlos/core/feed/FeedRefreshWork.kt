@@ -59,12 +59,14 @@ class FeedRefreshWorker(
         )
         val feeds = entry.feedRepository()
         val playlists = entry.playlistRepository()
+        feeds.requeueUnplayable()
         feeds.requeueInterrupted()
         val gate = Semaphore(FeedRefresh.CONCURRENCY)
         while (true) {
             val batch = feeds.pendingRefresh()
             if (batch.isEmpty()) {
                 runCatching { playlists.refresh() }
+                runCatching { playlists.repairUnplayableEnclosures() }
                 return Result.success()
             }
             coroutineScope {

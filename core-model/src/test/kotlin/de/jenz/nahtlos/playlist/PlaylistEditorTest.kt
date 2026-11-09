@@ -101,6 +101,26 @@ class PlaylistEditorTest {
     }
 
     @Test
+    fun refreshReplacesAYoutubeEnclosureWithTheAudioFile() {
+        val broken = entry("a", day).copy(enclosureUrl = "https://youtu.be/XcYgUdvDxxA")
+        val library = episodes.map {
+            if (it.episodeKey == "a") it.copy(enclosureUrl = "https://serve.example/a.mp3") else it
+        }
+        val refreshed = PlaylistEditor.refresh(listOf(broken), library, day, PlaylistSort.OLDEST_FIRST)
+        assertEquals("https://serve.example/a.mp3", refreshed.first { it.episodeKey == "a" }.enclosureUrl)
+    }
+
+    @Test
+    fun realignLeavesAPlayableEnclosureUntouched() {
+        val chosen = entry("a", day).copy(enclosureUrl = "https://cdn.example/hq.mp3")
+        val aligned = PlaylistEditor.realignEnclosures(
+            listOf(chosen),
+            mapOf("a" to "https://cdn.example/low.mp3"),
+        )
+        assertEquals("https://cdn.example/hq.mp3", aligned.single().enclosureUrl)
+    }
+
+    @Test
     fun refreshRewritesAUrlKeyOnceTheGuidIsKnown() {
         val urlKey = entry("url:old", day * 2).copy(enclosureUrl = "https://cdn.example/c.mp3")
         val candidates = episodes + candidate("c", day * 2, "Mitte").copy(enclosureUrl = "https://cdn.example/c.mp3")

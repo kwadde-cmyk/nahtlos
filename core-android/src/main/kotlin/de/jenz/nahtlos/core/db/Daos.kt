@@ -91,6 +91,9 @@ interface EpisodeDao {
     @Query("SELECT episodeKey FROM episodes WHERE podcastId = :podcastId")
     suspend fun keysForPodcast(podcastId: String): List<String>
 
+    @Query("SELECT podcastId, enclosureUrl FROM episodes")
+    suspend fun enclosureRefs(): List<EnclosureRef>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(entities: List<EpisodeEntity>)
 

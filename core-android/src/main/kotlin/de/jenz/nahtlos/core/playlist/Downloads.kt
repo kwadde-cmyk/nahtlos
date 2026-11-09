@@ -22,6 +22,8 @@ import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.net.Net
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.diagnose.DiagnoseText
+import de.jenz.nahtlos.feed.EnclosurePolicy
 import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.playlist.DownloadCleanup
@@ -194,15 +196,26 @@ class PlaylistDownloadWorker(
                 )
             }
             for (item in queued) {
-                if (item.enclosureUrl.isBlank()) continue
+                val episode = entry.database().episodes().get(item.episodeKey)
+                val url = downloadUrl(item.enclosureUrl, episode?.enclosureUrl, episode?.mimeType)
+                if (url.isBlank()) {
+                    val shown = episode?.enclosureUrl?.ifBlank { item.enclosureUrl } ?: item.enclosureUrl
+                    if (shown.isNotBlank()) {
+                        AppLog.record(
+                            "Download",
+                            "Keine Audiodatei, übersprungen: ${DiagnoseText.publicLocation(shown)}",
+                        )
+                    }
+                    continue
+                }
                 val progress = entry.database().progress().get(item.episodeKey)
                 if (progress?.status == ProgressStatus.COMPLETED.name) continue
                 if (store.existingFile(item.episodeKey) != null) continue
-                if (AudioSource.mediaMime(null, item.enclosureUrl) == AudioSource.HLS) continue
+                if (AudioSource.mediaMime(null, url) == AudioSource.HLS) continue
                 val target = File(directory, EpisodeKeys.sha256(item.episodeKey) + ".bin")
                 val partial = File(directory, target.name + ".partial")
                 val response = client.newCall(
-                    Request.Builder().url(item.enclosureUrl).header("User-Agent", Net.USER_AGENT).build(),
+                    Request.Builder().url(url).header("User-Agent", Net.USER_AGENT).build(),
                 ).execute()
                 var stop = false
                 response.use { bodyResponse ->
@@ -264,6 +277,12 @@ class PlaylistDownloadWorker(
             if (runAttemptCount >= 5) Result.failure() else Result.retry()
         }
     }
+}
+
+internal fun downloadUrl(playlistUrl: String, libraryUrl: String?, libraryMime: String?): String {
+    if (EnclosurePolicy.isPlayable(libraryUrl, libraryMime)) return libraryUrl.orEmpty()
+    if (EnclosurePolicy.isPlayable(playlistUrl, null)) return playlistUrl
+    return ""
 }
 
 class DownloadCleanupWorker(

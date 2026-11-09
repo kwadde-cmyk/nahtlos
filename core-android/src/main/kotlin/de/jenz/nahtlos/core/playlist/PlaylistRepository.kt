@@ -204,7 +204,23 @@ class PlaylistRepository @Inject constructor(
         } else if (local.updatedAt > 0L && (PlaylistResolver.isPlaceholder(remote) || local.updatedAt > remote.updatedAt)) {
             push(current, local)
         }
+        repairUnplayableEnclosures()
         downloads.enqueue()
+    }
+
+    /**
+     * Schreibt YouTube- und andere Nicht-Audio-Adressen in der Playlist auf die Enclosure aus Room
+     * und schickt das Dokument an den Sync-Server, damit das andere Gerät dieselbe Korrektur bekommt.
+     */
+    suspend fun repairUnplayableEnclosures() {
+        val existing = current()
+        if (existing.items.isEmpty()) return
+        val byKey = candidates().associate { it.episodeKey to it.enclosureUrl }
+        val items = PlaylistEditor.realignEnclosures(existing.items, byKey)
+        if (items == existing.items) return
+        val fixed = items.zip(existing.items).count { (next, previous) -> next.enclosureUrl != previous.enclosureUrl }
+        AppLog.record("Playlist", "$fixed Audio-Adressen korrigiert und zum Server geschickt.")
+        write(existing.copy(items = items), sync = true)
     }
 
     suspend fun applyRemote(remote: ListeningPlaylist) {

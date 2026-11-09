@@ -139,12 +139,19 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                     return
                 }
                 if ((scheme == "http" || scheme == "https") && unrecognized(error)) {
+                    playbackCache.discard(uri.toString())
                     if (!probed.add(item.mediaId)) {
                         skipUnplayable(item, "Diese Folge lässt sich nicht abspielen und wird übersprungen.")
                         return
                     }
                     scope.launch(Dispatchers.IO) {
                         val peeked = peekStream(uri.toString())
+                        peeked?.finalUrl?.let { playbackCache.discard(it) }
+                        val type = peeked?.contentType?.substringBefore(';')?.trim().orEmpty().ifBlank { "ohne Content-Type" }
+                        AppLog.record(
+                            "Player",
+                            "Source error ${DiagnoseText.publicLocation(peeked?.finalUrl ?: uri.toString())} ($type)",
+                        )
                         val action = PlaybackRecovery.action(
                             kind = peeked?.kind ?: HeaderKind.UNKNOWN,
                             mime = peeked?.mime,
@@ -285,7 +292,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         return false
     }
 
-    private data class StreamPeek(val finalUrl: String, val mime: String?, val kind: HeaderKind)
+    private data class StreamPeek(val finalUrl: String, val mime: String?, val contentType: String?, val kind: HeaderKind)
 
     private fun peekStream(url: String): StreamPeek? = runCatching {
         val request = Request.Builder().url(url).header("User-Agent", Net.USER_AGENT).header("Range", "bytes=0-511").build()
@@ -297,7 +304,12 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             val finalUrl = response.request.url.toString()
             val kind = AudioSource.headerKind(bytes)
             val mime = AudioSource.mediaMime(type, finalUrl)
-            StreamPeek(finalUrl = finalUrl, mime = mime, kind = if (mime == AudioSource.HLS) HeaderKind.PLAYLIST else kind)
+            StreamPeek(
+                finalUrl = finalUrl,
+                mime = mime,
+                contentType = type,
+                kind = if (mime == AudioSource.HLS) HeaderKind.PLAYLIST else kind,
+            )
         }
     }.getOrNull()
 

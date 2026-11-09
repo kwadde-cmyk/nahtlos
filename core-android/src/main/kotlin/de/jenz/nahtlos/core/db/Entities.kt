@@ -107,6 +107,11 @@ data class DownloadEntity(
     val completedAt: Long?,
 )
 
+data class EnclosureRef(
+    val podcastId: String,
+    val enclosureUrl: String,
+)
+
 data class EpisodeCandidateRow(
     val episodeKey: String,
     val title: String,

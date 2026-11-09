@@ -10,6 +10,7 @@ import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.NahtlosDatabase
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.feed.EnclosurePolicy
 import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.playlist.entry
@@ -96,10 +97,11 @@ class LibraryBrowser @Inject constructor(
             return episodeItem(episode, podcast, playable = true)
         }
         val entry = playlists.current().entry(mediaId) ?: return null
+        val remote = playbackRemote(entry.episodeKey, entry.enclosureUrl)
         return MediaItem.Builder()
             .setMediaId(entry.episodeKey)
-            .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-            .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
+            .setUri(localOrRemote(entry.episodeKey, remote))
+            .apply { AudioSource.mediaMime(null, remote)?.let { setMimeType(it) } }
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(entry.title.ifBlank { "Folge" })
@@ -119,10 +121,11 @@ class LibraryBrowser @Inject constructor(
         }
         val built = items.mapNotNull { entry ->
             runCatching {
+                val remote = playbackRemote(entry.episodeKey, entry.enclosureUrl)
                 MediaItem.Builder()
                     .setMediaId(entry.episodeKey)
-                    .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-                    .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
+                    .setUri(localOrRemote(entry.episodeKey, remote))
+                    .apply { AudioSource.mediaMime(null, remote)?.let { setMimeType(it) } }
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(entry.title.ifBlank { "Folge" })
@@ -145,10 +148,21 @@ class LibraryBrowser @Inject constructor(
     }
 
     suspend fun streamUri(mediaId: String): Uri? {
-        val remote = db.episodes().get(mediaId)?.enclosureUrl
-            ?: playlists.current().entry(mediaId)?.enclosureUrl
-        if (remote.isNullOrBlank()) return null
+        val remote = playbackRemote(mediaId, playlists.current().entry(mediaId)?.enclosureUrl.orEmpty())
+        if (remote.isBlank()) return null
         return Uri.parse(remote)
+    }
+
+    /**
+     * Die Folge in Room gewinnt, sobald ihre Adresse eine Audiodatei ist.
+     * Eine in der Playlist gespeicherte YouTube-URI wird dann nicht mehr abgespielt.
+     */
+    private suspend fun playbackRemote(episodeKey: String, playlistUrl: String): String {
+        val episode = db.episodes().get(episodeKey)
+        val libraryUrl = episode?.enclosureUrl.orEmpty()
+        if (EnclosurePolicy.isPlayable(libraryUrl, episode?.mimeType)) return libraryUrl
+        if (EnclosurePolicy.isPlayable(playlistUrl, null)) return playlistUrl
+        return libraryUrl.ifBlank { playlistUrl }
     }
 
     private fun localOrRemote(episodeKey: String, remote: String): Uri =
@@ -211,7 +225,11 @@ class LibraryBrowser @Inject constructor(
         val builder = MediaItem.Builder()
             .setMediaId(episode.episodeKey)
             .setUri(localOrRemote(episode.episodeKey, episode.enclosureUrl))
-            .apply { AudioSource.mediaMime(episode.mimeType, episode.enclosureUrl)?.let { setMimeType(it) } }
+            .apply {
+                if (EnclosurePolicy.isPlayable(episode.enclosureUrl, episode.mimeType)) {
+                    AudioSource.mediaMime(episode.mimeType, episode.enclosureUrl)?.let { setMimeType(it) }
+                }
+            }
         val extras = episode.extras()
         val title = if (extras.live) "Live: ${episode.title}" else episode.title
         val chapterHint = episode.chaptersJson != "[]" || !episode.chaptersUrl.isNullOrBlank()
