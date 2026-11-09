@@ -8,10 +8,12 @@ import de.jenz.nahtlos.core.sync.SyncRepository
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import de.jenz.nahtlos.playback.PlaybackTuning
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -88,6 +90,8 @@ class SettingsViewModel @Inject constructor(
     )
 
     private val _notice = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _remoteDiagnose = MutableStateFlow<String?>(null)
+    val remoteDiagnose: StateFlow<String?> = _remoteDiagnose.asStateFlow()
     val notice: SharedFlow<String> = _notice.asSharedFlow()
 
     fun save(
@@ -213,6 +217,31 @@ class SettingsViewModel @Inject constructor(
                 throw cancelled
             } catch (error: Exception) {
                 _notice.emit(error.message ?: "Sync fehlgeschlagen")
+            }
+        }
+    }
+
+    fun pushDiagnose(text: String) {
+        viewModelScope.launch {
+            try {
+                sync.pushDiagnose(text)
+                _notice.emit("Diagnose liegt auf dem Server. Am anderen Gerät unter Diagnose holen.")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _notice.emit(error.message ?: "Diagnose nicht gesendet")
+            }
+        }
+    }
+
+    fun pullDiagnose() {
+        viewModelScope.launch {
+            _remoteDiagnose.value = try {
+                sync.pullDiagnose()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error.message ?: "Diagnose nicht geladen"
             }
         }
     }

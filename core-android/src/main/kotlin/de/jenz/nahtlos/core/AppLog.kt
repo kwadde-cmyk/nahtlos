@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.core
 
 import android.content.Context
+import de.jenz.nahtlos.diagnose.DiagnoseText
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.time.Instant
@@ -36,17 +37,18 @@ object AppLog {
             }
             append('\n')
         }
+        val safe = DiagnoseText.scrub(line)
         synchronized(this) {
             val file = context.filesDir.resolve(FILE_NAME)
             val previous = if (file.isFile) file.readText() else ""
-            file.writeText((previous + line).takeLast(MAX_CHARS))
+            file.writeText((previous + safe).takeLast(MAX_CHARS))
         }
     }
 
     fun read(context: Context): String? {
         val file = context.applicationContext.filesDir.resolve(FILE_NAME)
         if (!file.isFile || file.length() == 0L) return null
-        return file.readText().take(MAX_CHARS)
+        return DiagnoseText.scrub(file.readText()).take(MAX_CHARS)
     }
 
     fun clear(context: Context) {

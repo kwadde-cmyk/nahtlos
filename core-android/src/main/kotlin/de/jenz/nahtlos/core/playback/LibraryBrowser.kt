@@ -41,6 +41,12 @@ class LibraryBrowser @Inject constructor(
     fun emptyPlayback(): MediaItem =
         note("now:empty", "Nichts läuft", "Bibliothek oder Playlist öffnen")
 
+    fun failureNote(parentId: String): MediaItem =
+        note("fail:$parentId", "Ordner nicht geladen", "Die Diagnose in den Einstellungen hat den Fehler.")
+
+    fun setupNote(): MediaItem =
+        note("now:setup", "Server fehlt", "In den Einstellungen koppeln. Sonst bleibt die Liste leer.")
+
     suspend fun children(parentId: String): List<MediaItem> = when (parentId) {
         LibraryIds.ROOT -> listOf(
             folder(LibraryIds.PLAYLIST, "Playlist", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
@@ -111,22 +117,31 @@ class LibraryBrowser @Inject constructor(
         if (items.isEmpty()) {
             return listOf(note("empty-playlist", "Keine Playlist", "Am Telefon ein Datum wählen."))
         }
-        return items.map { entry ->
-            MediaItem.Builder()
-                .setMediaId(entry.episodeKey)
-                .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
-                .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(entry.title.ifBlank { "Folge" })
-                        .setArtist(entry.podcastTitle)
-                        .setIsPlayable(true)
-                        .setIsBrowsable(false)
-                        .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
-                        .build(),
+        val built = items.mapNotNull { entry ->
+            runCatching {
+                MediaItem.Builder()
+                    .setMediaId(entry.episodeKey)
+                    .setUri(localOrRemote(entry.episodeKey, entry.enclosureUrl))
+                    .apply { AudioSource.mediaMime(null, entry.enclosureUrl)?.let { setMimeType(it) } }
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(entry.title.ifBlank { "Folge" })
+                            .setArtist(entry.podcastTitle)
+                            .setIsPlayable(true)
+                            .setIsBrowsable(false)
+                            .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+                            .build(),
+                    )
+                    .build()
+            }.getOrElse { error ->
+                de.jenz.nahtlos.core.AppLog.record(
+                    "Bibliothek",
+                    "Playlist-Eintrag ${entry.episodeKey} nicht anzeigbar: ${error.javaClass.simpleName}",
                 )
-                .build()
+                null
+            }
         }
+        return built.ifEmpty { listOf(note("empty-playlist", "Playlist nicht anzeigbar", "Siehe Diagnose in den Einstellungen.")) }
     }
 
     suspend fun streamUri(mediaId: String): Uri? {
@@ -278,5 +293,6 @@ object LibraryIds {
 
     fun isFolder(mediaId: String): Boolean =
         mediaId == ROOT || mediaId == BROWSE || mediaId == CONTINUE || mediaId == SUBSCRIPTIONS || mediaId == PLAYLIST ||
-            mediaId.startsWith("pod:") || mediaId.startsWith("empty") || mediaId.startsWith("now:")
+            mediaId.startsWith("pod:") || mediaId.startsWith("empty") || mediaId.startsWith("now:") ||
+            mediaId.startsWith("fail:")
 }

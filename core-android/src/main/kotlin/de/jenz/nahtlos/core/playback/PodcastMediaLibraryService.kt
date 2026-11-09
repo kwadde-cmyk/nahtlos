@@ -14,7 +14,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.CommandButton
@@ -35,8 +34,10 @@ import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.wallet.SecretScrub
 import de.jenz.nahtlos.core.playlist.DownloadScheduler
 import de.jenz.nahtlos.core.playlist.DownloadStore
+import de.jenz.nahtlos.diagnose.DiagnoseText
 import de.jenz.nahtlos.playback.AudioSource
 import de.jenz.nahtlos.playback.HeaderKind
+import de.jenz.nahtlos.playback.PlaybackRecovery
 import de.jenz.nahtlos.core.net.Net
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -68,6 +69,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     @Inject lateinit var feeds: FeedRepository
     @Inject lateinit var artwork: ArtworkStore
     @Inject lateinit var boosts: BoostService
+    @Volatile private var currentMediaId: String? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var player: ExoPlayer? = null
@@ -105,6 +107,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         effects = fx
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                currentMediaId = mediaItem?.mediaId
                 fx.applyForCurrentItem()
             }
 
@@ -135,20 +138,33 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                     }.invokeOnCompletion { fallingBack.remove(item.mediaId) }
                     return
                 }
-                if ((scheme == "http" || scheme == "https") && unrecognized(error) && probed.add(item.mediaId)) {
+                if ((scheme == "http" || scheme == "https") && unrecognized(error)) {
+                    if (!probed.add(item.mediaId)) {
+                        skipUnplayable(item, "Diese Folge lässt sich nicht abspielen und wird übersprungen.")
+                        return
+                    }
                     scope.launch(Dispatchers.IO) {
                         val peeked = peekStream(uri.toString())
+                        val action = PlaybackRecovery.action(
+                            kind = peeked?.kind ?: HeaderKind.UNKNOWN,
+                            mime = peeked?.mime,
+                            currentUrl = uri.toString(),
+                            finalUrl = peeked?.finalUrl ?: uri.toString(),
+                        )
                         withContext(Dispatchers.Main) {
                             val playerNow = player ?: return@withContext
                             if (playerNow.currentMediaItem?.mediaId != item.mediaId) return@withContext
-                            if (peeked == AudioSource.HLS) {
-                                AppLog.record("Player", "Stream ist eine Playlist, spiele HLS.")
+                            if (action == PlaybackRecovery.REPLAY && peeked != null) {
+                                val mime = PlaybackRecovery.replayMime(peeked.kind, peeked.mime)
+                                val next = item.buildUpon().setUri(peeked.finalUrl)
+                                if (mime != null) next.setMimeType(mime)
+                                AppLog.record("Player", "Stream für ${item.mediaId} wird über die aufgelöste Adresse erneut gestartet.")
                                 playbackSync?.suppressPushes()
-                                playerNow.setMediaItem(item.buildUpon().setUri(uri).setMimeType(AudioSource.HLS).build(), position)
+                                playerNow.setMediaItem(next.build(), position)
                                 playerNow.prepare()
                                 playerNow.play()
                             } else {
-                                AppLog.record("Player", "Stream für ${item.mediaId} ist kein abspielbares Audio.")
+                                skipUnplayable(item, "Diese Folge ist kein abspielbares Audio und wird übersprungen.")
                             }
                         }
                     }
@@ -269,7 +285,9 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         return false
     }
 
-    private fun peekStream(url: String): String? = runCatching {
+    private data class StreamPeek(val finalUrl: String, val mime: String?, val kind: HeaderKind)
+
+    private fun peekStream(url: String): StreamPeek? = runCatching {
         val request = Request.Builder().url(url).header("User-Agent", Net.USER_AGENT).header("Range", "bytes=0-511").build()
         http.newBuilder().callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
             val buffer = ByteArray(512)
@@ -277,15 +295,34 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             val bytes = if (read > 0) buffer.copyOf(read) else byteArrayOf()
             val type = response.header("Content-Type")
             val finalUrl = response.request.url.toString()
-            if (AudioSource.mediaMime(type, finalUrl) == AudioSource.HLS || AudioSource.headerKind(bytes) == HeaderKind.PLAYLIST) {
-                AudioSource.HLS
-            } else if (AudioSource.headerKind(bytes) == HeaderKind.MARKUP) {
-                null
-            } else {
-                AudioSource.mediaMime(type, finalUrl)
-            }
+            val kind = AudioSource.headerKind(bytes)
+            val mime = AudioSource.mediaMime(type, finalUrl)
+            StreamPeek(finalUrl = finalUrl, mime = mime, kind = if (mime == AudioSource.HLS) HeaderKind.PLAYLIST else kind)
         }
     }.getOrNull()
+
+    private fun skipUnplayable(item: androidx.media3.common.MediaItem, message: String) {
+        val text = DiagnoseText.scrub(message).take(180)
+        PlaybackNotice.show(text)
+        AppLog.record("Player", text)
+        scope.launch(Dispatchers.IO) {
+            val next = runCatching { playlists.skipBroken(item.mediaId) }.getOrNull()
+            val resolved = next?.let { runCatching { browser.resolvePlayable(it) }.getOrNull() }
+            val position = next?.let { runCatching { sync.positionForPlayback(it) }.getOrDefault(0L) } ?: 0L
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@PodcastMediaLibraryService, text, Toast.LENGTH_LONG).show()
+                val playerNow = player ?: return@withContext
+                if (resolved == null) {
+                    playerNow.stop()
+                    return@withContext
+                }
+                playbackSync?.suppressPushes()
+                playerNow.setMediaItem(resolved, position)
+                playerNow.prepare()
+                playerNow.play()
+            }
+        }
+    }
 
     private val quickBoostBusy = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -414,10 +451,8 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             browser: ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
-            val automotive = packageManager.hasSystemFeature(AUTOMOTIVE)
-            if (automotive && !settings.read().configured) {
-                return Futures.immediateFuture(signInRequired())
-            }
+            // Ein Fehler-Root wird vom Mediencenter von AAOS 15 als „No root“ verworfen.
+            // Die Fläche bleibt dann leer, auch wenn Einstellungen schon funktionieren.
             scope.launch(Dispatchers.IO) { runCatching { sync.pullAndMerge() } }
             return Futures.immediateFuture(LibraryResult.ofItem(this@PodcastMediaLibraryService.browser.rootItem(), params))
         }
@@ -468,8 +503,15 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 if (automotive && parentId == LibraryIds.ROOT) automotiveRoot()
                 else this@PodcastMediaLibraryService.browser.children(parentId)
             }.getOrElse { error ->
-                AppLog.record("Player", "Ordner ohne Netz: ${error.message}")
-                emptyList()
+                AppLog.record(
+                    "Bibliothek",
+                    DiagnoseText.scrub("Ordner $parentId: ${error.javaClass.simpleName}: ${error.message}"),
+                    error,
+                )
+                listOf(this@PodcastMediaLibraryService.browser.failureNote(parentId))
+            }
+            if (parentId == LibraryIds.ROOT || parentId == LibraryIds.PLAYLIST || parentId == LibraryIds.BROWSE || children.size <= 1) {
+                AppLog.record("Bibliothek", "Ordner $parentId: ${children.size} Einträge")
             }
             LibraryResult.ofItemList(pageOf(children, page, pageSize), params)
         }
@@ -521,26 +563,12 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     }
 
     private suspend fun automotiveRoot(): List<MediaItem> {
-        val currentId = withContext(Dispatchers.Main) { player?.currentMediaItem?.mediaId }
-        val current = currentId?.takeIf { !LibraryIds.isFolder(it) }?.let { browser.resolvePlayable(it) }
-        return listOf(current ?: browser.emptyPlayback(), browser.browseFolder())
-    }
-
-    private fun signInRequired(): LibraryResult<MediaItem> {
-        val extras = Bundle()
-        val launch = AutomotiveSetup.preferencesIntent(packageName)
-        if (launch.resolveActivity(packageManager) != null) {
-            val pending = PendingIntent.getActivity(
-                this,
-                2,
-                AutomotiveSetup.openPairing(launch),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            extras.putString(MediaConstants.EXTRAS_KEY_ERROR_RESOLUTION_ACTION_LABEL_COMPAT, AutomotiveSetup.RESOLUTION_LABEL)
-            extras.putParcelable(MediaConstants.EXTRAS_KEY_ERROR_RESOLUTION_ACTION_INTENT_COMPAT, pending)
+        if (!settings.read().configured) {
+            return listOf(browser.setupNote(), browser.browseFolder())
         }
-        val params = LibraryParams.Builder().setExtras(extras).build()
-        return LibraryResult.ofError(LibraryResult.RESULT_ERROR_SESSION_AUTHENTICATION_EXPIRED, params)
+        val currentId = currentMediaId?.takeIf { !LibraryIds.isFolder(it) }
+        val current = currentId?.let { browser.resolvePlayable(it) }
+        return listOf(current ?: browser.emptyPlayback(), browser.browseFolder())
     }
 
     private suspend fun resolveIncoming(item: MediaItem): MediaItem {

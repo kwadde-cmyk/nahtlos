@@ -14,6 +14,8 @@ import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.wallet.WalletStore
+import de.jenz.nahtlos.diagnose.DiagnoseText
+import de.jenz.nahtlos.diagnose.DiagnoseUpload
 import de.jenz.nahtlos.core.wallet.toSync
 import de.jenz.nahtlos.opml.Opml
 import de.jenz.nahtlos.opml.OpmlOutline
@@ -427,6 +429,25 @@ class SyncRepository @Inject constructor(
             } else {
                 applyRemote(result.stored)
             }
+        }
+    }
+
+    suspend fun pushDiagnose(text: String) {
+        val current = settings.read()
+        if (!current.configured) throw IllegalStateException("Server ist nicht eingerichtet")
+        val clean = DiagnoseText.scrub(text)
+        val reason = DiagnoseText.reject(clean)
+        if (reason != null) throw IllegalArgumentException("Diagnose abgelehnt: $reason")
+        api.putDiagnose(current, DiagnoseUpload(System.currentTimeMillis(), clean))
+    }
+
+    suspend fun pullDiagnose(): String {
+        val current = settings.read()
+        if (!current.configured) return "Server ist nicht eingerichtet"
+        val notes = api.getDiagnose(current)
+        if (notes.isEmpty()) return "Noch keine Diagnose auf dem Server."
+        return notes.joinToString("\n\n") { note ->
+            "Gerät ${note.deviceId}\n${DiagnoseText.scrub(note.body)}"
         }
     }
 

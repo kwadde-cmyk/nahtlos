@@ -139,6 +139,17 @@ class PlaylistRepository @Inject constructor(
      * Marks the episode finished in the queue. Returns the next episode key when this one
      * was part of the playlist, so the player can continue.
      */
+    /** Nächste Playlist-Folge, die kaputte bleibt draußen und wird nicht als Download gezählt. */
+    suspend fun skipBroken(episodeKey: String): String? {
+        val existing = current()
+        val next = de.jenz.nahtlos.playlist.PlaylistEditor.nextAfter(existing.items, episodeKey)?.episodeKey
+        if (existing.items.any { it.episodeKey == episodeKey }) {
+            dropFinished(existing, setOf(episodeKey))
+        }
+        AppLog.record("Player", "Folge übersprungen, nächste ist ${next ?: "keine"}.")
+        return next
+    }
+
     suspend fun onEpisodeFinished(episodeKey: String): String? {
         val existing = current()
         val next = PlaylistEditor.nextAfter(existing.items, episodeKey)?.episodeKey

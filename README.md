@@ -159,7 +159,7 @@ git pull
 docker compose up -d --build
 ```
 
-Das Volume mit `sync.db` nicht löschen. Danach `GET /health` prüfen. Pro Gerät dieselbe Historie, gleiche Id wird nicht doppelt gespeichert, der neuere Zeitpunkt gewinnt. NWC-Link, Preimage, Invoice und Wallet-Geheimnis nimmt der Server nicht an und schreibt sie nicht ins Log.
+Das Volume mit `sync.db` nicht löschen. Danach `GET /health` prüfen. Pro Gerät dieselbe Historie, gleiche Id wird nicht doppelt gespeichert, der neuere Zeitpunkt gewinnt. NWC-Link, Preimage, Invoice und Wallet-Geheimnis nimmt der Server nicht an und schreibt sie nicht ins Log. Die Tabelle `diagnose` speichert nur den bereinigten Text der Diagnose (ein Eintrag pro Gerät). Wallet-Link und Invoice werden abgelehnt.
 
 ### Nginx Proxy Manager
 

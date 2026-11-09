@@ -93,6 +93,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     var crash by remember { mutableStateOf<String?>(null) }
     var diagnose by remember { mutableStateOf<String?>(null) }
+    val remote by viewModel.remoteDiagnose.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
         crash = withContext(Dispatchers.IO) { CrashLog.read(context) }
         diagnose = withContext(Dispatchers.IO) { AppLog.read(context) }
@@ -284,6 +285,13 @@ fun SettingsScreen(
                 diagnose?.let { "Sync und Wiedergabe\n$it" },
                 crash?.let { "Letzter Absturz\n$it" },
             ).joinToString("\n\n").ifBlank { null }
+            TextButton(onClick = viewModel::pullDiagnose) { Text("Vom Auto holen") }
+            remote?.let { text ->
+                Text("Vom Server", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                SelectionContainer {
+                    Text(text, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
+            }
             if (report == null) {
                 Text(
                     "Noch nichts protokolliert.",
@@ -308,6 +316,7 @@ fun SettingsScreen(
                         }
                         context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
                     }) { Text("Teilen") }
+                    TextButton(onClick = { viewModel.pushDiagnose(report) }) { Text("Auf den Server") }
                     TextButton(onClick = {
                         AppLog.clear(context)
                         CrashLog.clear(context)
