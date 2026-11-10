@@ -21,5 +21,44 @@ enum class SwipeAction(val id: String, val label: String, val removesRow: Boolea
         val END_DEFAULT = REMOVE_PLAYLIST
 
         fun fromId(id: String?): SwipeAction = entries.firstOrNull { it.id == id } ?: MARK_PLAYED
+
+        /**
+         * Actions that fit the selection. A pair shows one side when every episode agrees,
+         * and both sides when the selection is mixed.
+         */
+        fun matching(
+            keys: Collection<String>,
+            played: Set<String>,
+            inPlaylist: Set<String>,
+            downloaded: Set<String>,
+        ): List<SwipeAction> {
+            if (keys.isEmpty()) return emptyList()
+            return buildList {
+                if (keys.any { it !in inPlaylist }) add(ADD_PLAYLIST)
+                if (keys.any { it in inPlaylist }) add(REMOVE_PLAYLIST)
+                if (keys.any { it !in downloaded }) add(DOWNLOAD)
+                if (keys.any { it in downloaded }) add(DELETE_DOWNLOAD)
+                if (keys.any { it !in played }) add(MARK_PLAYED)
+                if (keys.any { it in played }) add(MARK_UNPLAYED)
+            }
+        }
+
+        /** Episodes the action would actually change, so a mixed selection does not reset the rest. */
+        fun targets(
+            action: SwipeAction,
+            keys: Collection<String>,
+            played: Set<String>,
+            inPlaylist: Set<String>,
+            downloaded: Set<String>,
+        ): List<String> = keys.distinct().filter { key ->
+            when (action) {
+                ADD_PLAYLIST -> key !in inPlaylist
+                REMOVE_PLAYLIST -> key in inPlaylist
+                DOWNLOAD -> key !in downloaded
+                DELETE_DOWNLOAD -> key in downloaded
+                MARK_PLAYED -> key !in played
+                MARK_UNPLAYED -> key in played
+            }
+        }
     }
 }

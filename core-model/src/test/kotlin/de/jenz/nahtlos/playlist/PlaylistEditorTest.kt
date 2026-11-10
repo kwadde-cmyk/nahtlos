@@ -169,6 +169,54 @@ class PlaylistEditorTest {
     }
 
     @Test
+    fun menuShowsOnlyActionsThatFitTheSelection() {
+        val fresh = SwipeAction.matching(listOf("a", "b"), emptySet(), emptySet(), emptySet())
+        assertEquals(
+            listOf(SwipeAction.ADD_PLAYLIST, SwipeAction.DOWNLOAD, SwipeAction.MARK_PLAYED),
+            fresh,
+        )
+        val done = SwipeAction.matching(
+            listOf("a"),
+            played = setOf("a"),
+            inPlaylist = setOf("a"),
+            downloaded = setOf("a"),
+        )
+        assertEquals(
+            listOf(SwipeAction.REMOVE_PLAYLIST, SwipeAction.DELETE_DOWNLOAD, SwipeAction.MARK_UNPLAYED),
+            done,
+        )
+        val mixed = SwipeAction.matching(
+            listOf("a", "b"),
+            played = setOf("a"),
+            inPlaylist = setOf("b"),
+            downloaded = setOf("a"),
+        )
+        assertEquals(
+            listOf(
+                SwipeAction.ADD_PLAYLIST,
+                SwipeAction.REMOVE_PLAYLIST,
+                SwipeAction.DOWNLOAD,
+                SwipeAction.DELETE_DOWNLOAD,
+                SwipeAction.MARK_PLAYED,
+                SwipeAction.MARK_UNPLAYED,
+            ),
+            mixed,
+        )
+        assertTrue(SwipeAction.matching(emptyList(), emptySet(), emptySet(), emptySet()).isEmpty())
+    }
+
+    @Test
+    fun menuTargetsOnlyEpisodesTheActionChanges() {
+        val keys = listOf("a", "b")
+        assertEquals(listOf("b"), SwipeAction.targets(SwipeAction.MARK_PLAYED, keys, setOf("a"), emptySet(), emptySet()))
+        assertEquals(listOf("a"), SwipeAction.targets(SwipeAction.MARK_UNPLAYED, keys, setOf("a"), emptySet(), emptySet()))
+        assertEquals(listOf("b"), SwipeAction.targets(SwipeAction.ADD_PLAYLIST, keys, emptySet(), setOf("a"), emptySet()))
+        assertEquals(listOf("a"), SwipeAction.targets(SwipeAction.REMOVE_PLAYLIST, keys, emptySet(), setOf("a"), emptySet()))
+        assertEquals(listOf("a"), SwipeAction.targets(SwipeAction.DELETE_DOWNLOAD, keys, emptySet(), emptySet(), setOf("a")))
+        assertEquals(listOf("b"), SwipeAction.targets(SwipeAction.DOWNLOAD, keys, emptySet(), emptySet(), setOf("a")))
+    }
+
+    @Test
     fun swipeTogglesAgainstTheCurrentState() {
         assertEquals(SwipeAction.MARK_UNPLAYED, SwipeAction.MARK_PLAYED.resolved(played = true, inPlaylist = false, downloaded = false))
         assertEquals(SwipeAction.MARK_PLAYED, SwipeAction.MARK_UNPLAYED.resolved(played = false, inPlaylist = false, downloaded = false))
