@@ -124,10 +124,6 @@ class EpisodesViewModel @Inject constructor(
         }
     }
 
-    fun toggle(action: SwipeAction, keys: List<String>) {
-        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
-    }
-
     fun unsubscribe(onDone: () -> Unit) {
         viewModelScope.launch {
             val feedUrl = feeds.getPodcast(podcastId)?.feedUrl
@@ -186,23 +182,17 @@ fun EpisodesScreen(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         bottomBar = {
             if (selection.active) {
-                SelectionBar(
-                    count = selection.keys.size,
+                val played = episodes.filter { it.progressStatus == "COMPLETED" }.map { it.episode.episodeKey }.toSet()
+                EpisodeSelectionBar(
+                    keys = selection.keys,
+                    played = played,
+                    inPlaylist = playlistKeys,
+                    downloaded = downloadKeys,
                     onAll = { selection.all(episodes.map { it.episode.episodeKey }) },
                     onNone = { selection.clear() },
-                    actions = run {
-                        val played = episodes.filter { it.progressStatus == "COMPLETED" }.map { it.episode.episodeKey }.toSet()
-                        listOf(
-                            bulkLabel(SwipeAction.ADD_PLAYLIST, selection.keys, played, playlistKeys, downloadKeys) to {
-                                viewModel.toggle(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear()
-                            },
-                            bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlistKeys, downloadKeys) to {
-                                viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
-                            },
-                            bulkLabel(SwipeAction.DOWNLOAD, selection.keys, played, playlistKeys, downloadKeys) to {
-                                viewModel.toggle(SwipeAction.DOWNLOAD, selection.keys.toList()); selection.clear()
-                            },
-                        )
+                    onAction = { action, keys ->
+                        viewModel.act(action, keys)
+                        selection.clear()
                     },
                 )
             }
@@ -366,7 +356,19 @@ private fun EpisodeList(
                     onClick = { onPlay(key) },
                     onLongPress = { onLongPress(key) },
                 ) {
-                    EpisodeRowItem(row, downloadKeys, transfers)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) {
+                            EpisodeRowItem(row, downloadKeys, transfers)
+                        }
+                        if (!selecting) {
+                            EpisodeActionMenuButton(
+                                played = played,
+                                inPlaylist = key in playlistKeys,
+                                downloaded = key in downloadKeys,
+                                onAction = { onSwipe(it, key) },
+                            )
+                        }
+                    }
                 }
             }
         }

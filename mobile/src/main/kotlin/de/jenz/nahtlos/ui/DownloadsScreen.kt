@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,10 +59,6 @@ class DownloadsViewModel @Inject constructor(
 
     fun act(action: SwipeAction, keys: List<String>) {
         viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
-    }
-
-    fun toggle(action: SwipeAction, keys: List<String>) {
-        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
     }
 }
 
@@ -103,21 +101,17 @@ fun DownloadsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (selection.active) {
-                SelectionBar(
-                    count = selection.keys.size,
+                EpisodeSelectionBar(
+                    keys = selection.keys,
+                    played = played,
+                    inPlaylist = playlistKeys,
+                    downloaded = downloaded,
                     onAll = { selection.all(rows.map { it.episodeKey }) },
                     onNone = { selection.clear() },
-                    actions = listOf(
-                        bulkLabel(SwipeAction.DELETE_DOWNLOAD, selection.keys, played, playlistKeys, downloaded) to {
-                            viewModel.toggle(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear()
-                        },
-                        bulkLabel(SwipeAction.ADD_PLAYLIST, selection.keys, played, playlistKeys, downloaded) to {
-                            viewModel.toggle(SwipeAction.ADD_PLAYLIST, selection.keys.toList()); selection.clear()
-                        },
-                        bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlistKeys, downloaded) to {
-                            viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
-                        },
-                    ),
+                    onAction = { action, keys ->
+                        viewModel.act(action, keys)
+                        selection.clear()
+                    },
                 )
             }
         },
@@ -126,17 +120,22 @@ fun DownloadsScreen(
             Column(Modifier.padding(padding).padding(20.dp)) {
                 Text("Keine gespeicherten Folgen.")
                 Text(
-                    "Folgen aus der Playlist lädt das Handy von selbst. Eine Datei löschst du durch Wischen oder langes Drücken.",
+                    "Folgen aus der Playlist lädt das Handy von selbst. Eine Datei löschst du per langem Drücken.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                GestureHint(Modifier.padding(top = 8.dp))
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                item { GestureHint() }
                 items(rows, key = { it.episodeKey }) { row ->
-                    DownloadLine(row, SwipeAction.START_DEFAULT, SwipeAction.END_DEFAULT, selection, playlistKeys, played, onPlay, viewModel::act)
+                    DownloadLine(
+                        row = row,
+                        selection = selection,
+                        played = row.episodeKey in played,
+                        inPlaylist = row.episodeKey in playlistKeys,
+                        onPlay = onPlay,
+                        onAction = { action -> viewModel.act(action, listOf(row.episodeKey)) },
+                    )
                 }
             }
         }
@@ -146,29 +145,33 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadLine(
     row: DownloadRow,
-    start: SwipeAction,
-    end: SwipeAction,
     selection: SelectionState,
-    playlistKeys: Set<String>,
-    played: Set<String>,
+    played: Boolean,
+    inPlaylist: Boolean,
     onPlay: (String) -> Unit,
-    onAction: (SwipeAction, List<String>) -> Unit,
+    onAction: (SwipeAction) -> Unit,
 ) {
-    val resolvedStart = start.resolved(row.episodeKey in played, row.episodeKey in playlistKeys, downloaded = true)
-    val resolvedEnd = end.resolved(row.episodeKey in played, row.episodeKey in playlistKeys, downloaded = true)
-    SwipeRow(resolvedStart, resolvedEnd, enabled = !selection.active, onAction = { onAction(it, listOf(row.episodeKey)) }) {
-        SelectableRow(
-            selected = row.episodeKey in selection.keys,
-            selecting = selection.active,
-            onClick = { if (selection.active) selection.toggle(row.episodeKey) else onPlay(row.episodeKey) },
-            onLongPress = { selection.start(row.episodeKey) },
-        ) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+    SelectableRow(
+        selected = row.episodeKey in selection.keys,
+        selecting = selection.active,
+        onClick = { if (selection.active) selection.toggle(row.episodeKey) else onPlay(row.episodeKey) },
+        onLongPress = { selection.start(row.episodeKey) },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Text(row.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     listOf(row.podcastTitle, "${row.bytes / 1024 / 1024} MB").filter { it.isNotBlank() }.joinToString(" · "),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (!selection.active) {
+                EpisodeActionMenuButton(
+                    played = played,
+                    inPlaylist = inPlaylist,
+                    downloaded = true,
+                    onAction = onAction,
                 )
             }
         }

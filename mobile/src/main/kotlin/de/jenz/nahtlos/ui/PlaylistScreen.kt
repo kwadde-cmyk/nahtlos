@@ -98,8 +98,8 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch { playlists.reorder(keys) }
     }
 
-    fun toggle(action: SwipeAction, keys: List<String>) {
-        viewModelScope.launch { commands.runToggled(action, keys)?.let { _undo.emit(it) } }
+    fun act(action: SwipeAction, keys: List<String>) {
+        viewModelScope.launch { commands.run(action, keys)?.let { _undo.emit(it) } }
     }
 
     fun setRemoveWhenFinished(enabled: Boolean) {
@@ -145,24 +145,17 @@ fun PlaylistScreen(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         bottomBar = {
             if (selection.active) {
-                SelectionBar(
-                    count = selection.keys.size,
+                EpisodeSelectionBar(
+                    keys = selection.keys,
+                    played = played,
+                    inPlaylist = playlist.items.map { it.episodeKey }.toSet(),
+                    downloaded = downloads,
                     onAll = { selection.all(playlist.items.map { it.episodeKey }) },
                     onNone = { selection.clear() },
-                    actions = listOf(
-                        bulkLabel(SwipeAction.REMOVE_PLAYLIST, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
-                            viewModel.toggle(SwipeAction.REMOVE_PLAYLIST, selection.keys.toList()); selection.clear()
-                        },
-                        bulkLabel(SwipeAction.MARK_PLAYED, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
-                            viewModel.toggle(SwipeAction.MARK_PLAYED, selection.keys.toList()); selection.clear()
-                        },
-                        bulkLabel(SwipeAction.DELETE_DOWNLOAD, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
-                            viewModel.toggle(SwipeAction.DELETE_DOWNLOAD, selection.keys.toList()); selection.clear()
-                        },
-                        bulkLabel(SwipeAction.DOWNLOAD, selection.keys, played, playlist.items.map { it.episodeKey }.toSet(), downloads) to {
-                            viewModel.toggle(SwipeAction.DOWNLOAD, selection.keys.toList()); selection.clear()
-                        },
-                    ),
+                    onAction = { action, keys ->
+                        viewModel.act(action, keys)
+                        selection.clear()
+                    },
                 )
             }
         },
@@ -224,7 +217,7 @@ fun PlaylistScreen(
                     )
                 } else {
                     Text(
-                        "Am Griff links ziehen sortiert. Langes Drücken startet die Auswahl, dann erscheinen Entfernen, Gehört und Download.",
+                        "Am Griff links ziehen sortiert. Langes Drücken startet die Auswahl, dann erscheinen die passenden Aktionen als Icons.",
                         modifier = Modifier.padding(top = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,6 +274,14 @@ fun PlaylistScreen(
                                             onDevice = item.episodeKey in downloads,
                                             transfer = transfers[item.episodeKey],
                                             modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                    }
+                                    if (!selection.active) {
+                                        EpisodeActionMenuButton(
+                                            played = item.episodeKey in played,
+                                            inPlaylist = true,
+                                            downloaded = item.episodeKey in downloads,
+                                            onAction = { action -> viewModel.act(action, listOf(item.episodeKey)) },
                                         )
                                     }
                                     LabeledIconButton(label = "Abspielen", onClick = { onPlay(item.episodeKey) }) {

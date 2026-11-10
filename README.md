@@ -80,7 +80,7 @@ Podcasting 2.0 im Player, in den Reitern Shownotes, Kapitel, Transkript, Persone
 
 Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Sync- und Player-Fehler schreibt `filesDir/diagnose.txt`. Beides steht unter Einstellungen → Diagnose und lässt sich teilen.
 
-Am Telefon sind die Aktionen beschriftet. Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Entfernen, Gehört und Download laufen über langes Drücken und die Aktionsleiste, nicht über Wischen. In der Folgenliste eines Podcasts bleibt das Wischen. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
+Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Folgen bearbeitet man über das Icon-Menü an der Zeile und über langes Drücken: die Aktionsleiste zeigt nur Icons, die zum Zustand passen (Playlist dazu oder daraus, Download oder löschen, gehört oder ungehört), mit Beschreibung und Tooltip. Gemischt darf beides stehen. In der Folgenliste eines Podcasts bleibt das Wischen, rechts Gehört und links Playlist. Die Downloads haben kein Wischen. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
 
 ### AAOS
 
@@ -228,7 +228,7 @@ Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYS
 ./gradlew :mobile:bundleRelease :automotive:bundleRelease
 ```
 
-Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **4**, versionName **0.1.3**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
+Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **5**, versionName **0.1.4**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
 
 R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
 
