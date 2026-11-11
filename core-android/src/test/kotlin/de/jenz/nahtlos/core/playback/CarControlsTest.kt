@@ -26,6 +26,16 @@ class CarControlsTest {
     }
 
     @Test
+    fun nahtlosOpensFromTheSystemPlayerOverflow() {
+        val button = CarControls.buttons(payments = true, automotive = true).first { it.action == SessionActions.OPEN_PLAYER }
+        assertEquals("Nahtlos", button.name)
+        assertEquals(listOf(CommandButton.SLOT_OVERFLOW), button.slots.toList())
+        assertFalse(CommandButton.SLOT_FORWARD_SECONDARY in button.slots)
+        assertTrue(button.iconRes != 0)
+        assertFalse(CarControls.buttons(payments = true, automotive = false).any { it.action == SessionActions.OPEN_PLAYER })
+    }
+
+    @Test
     fun withoutPaymentsTheCarStillShowsChaptersButNoBoost() {
         val names = CarControls.buttons(payments = false, automotive = true).map { it.name }
         assertFalse(names.contains("Boost"))

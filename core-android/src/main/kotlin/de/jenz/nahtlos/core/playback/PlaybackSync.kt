@@ -24,6 +24,7 @@ class PlaybackSync(
     private val sync: SyncRepository,
     private val scope: CoroutineScope,
     private val onEpisodeEnded: (String) -> Unit = {},
+    private val onAdoptIdle: () -> Unit = {},
 ) : Player.Listener {
     private var heartbeat: Job? = null
     private var ignoreSeekUntil = 0L
@@ -46,13 +47,24 @@ class PlaybackSync(
         }
         scope.launch {
             sync.remoteProgress.collect { remote ->
-                val current = player.currentMediaItem?.mediaId ?: return@collect
-                if (remote.episodeKey != current || remote.deviceId == sync.deviceId()) return@collect
-                if (abs(player.currentPosition - remote.positionMs) < 1_500) return@collect
-                ignoreSeekUntil = SystemClock.elapsedRealtime() + SyncPolicy.SEEK_IGNORE_MS
-                player.seekTo(remote.positionMs)
+                if (remote.deviceId == sync.deviceId()) return@collect
+                if (holdsPlayback()) {
+                    val current = player.currentMediaItem?.mediaId ?: return@collect
+                    if (remote.episodeKey != current) return@collect
+                    if (abs(player.currentPosition - remote.positionMs) < 1_500) return@collect
+                    ignoreSeekUntil = SystemClock.elapsedRealtime() + SyncPolicy.SEEK_IGNORE_MS
+                    player.seekTo(remote.positionMs)
+                    return@collect
+                }
+                onAdoptIdle()
             }
         }
+    }
+
+    /** Wiedergabe oder ein gerade gestartetes Puffern. Idle und Ende geben die Folge frei. */
+    private fun holdsPlayback(): Boolean {
+        if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) return false
+        return player.isPlaying || player.playWhenReady
     }
 
     fun flushBlocking() {

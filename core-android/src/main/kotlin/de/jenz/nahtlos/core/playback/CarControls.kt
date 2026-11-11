@@ -44,6 +44,20 @@ object CarControls {
             add(CarButton("Schneller", SessionActions.SPEED_UP, CommandButton.ICON_PLUS, overflow))
             add(CarButton("Zurück", SessionActions.SKIP_BACK, CommandButton.ICON_SKIP_BACK, overflow))
             add(CarButton("Vor", SessionActions.SKIP_FORWARD, CommandButton.ICON_SKIP_FORWARD, overflow))
+        }.let { rows ->
+            if (rows.isEmpty()) rows
+            else ArrayList(rows).apply {
+                add(
+                    1,
+                    CarButton(
+                        name = "Nahtlos",
+                        action = SessionActions.OPEN_PLAYER,
+                        icon = CommandButton.ICON_UNDEFINED,
+                        slots = overflow,
+                        iconRes = R.drawable.ic_launcher,
+                    ),
+                )
+            }
         }
     }
 
