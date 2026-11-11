@@ -44,6 +44,7 @@ import okhttp3.Request
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
 import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.core.sync.SyncRepository
+import de.jenz.nahtlos.sync.ResumeTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +53,8 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -78,6 +81,8 @@ class PodcastMediaLibraryService : MediaLibraryService() {
     private var effects: PlaybackEffects? = null
     private val fallingBack = mutableSetOf<String>()
     private val probed = mutableSetOf<String>()
+    private val adoptGate = Mutex()
+    private var playerLaunch: PendingIntent? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -106,6 +111,10 @@ class PodcastMediaLibraryService : MediaLibraryService() {
         val fx = PlaybackEffects(exo, settings, feeds, artwork, scope)
         effects = fx
         exo.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) publishSessionExtras()
+            }
+
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 currentMediaId = mediaItem?.mediaId
                 fx.applyForCurrentItem()
@@ -185,44 +194,142 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 fx.tickChapter()
             }
         }
-        val syncer = PlaybackSync(exo, sync, scope) { episodeKey ->
-            scope.launch {
-                val next = runCatching { playlists.onEpisodeFinished(episodeKey) }.getOrNull()
-                if (next != null) {
-                    val item = browser.resolvePlayable(next)
-                    val position = runCatching { sync.positionForPlayback(next) }.getOrDefault(0L)
-                    if (item != null) {
-                        withContext(Dispatchers.Main) {
-                            val current = player ?: return@withContext
-                            playbackSync?.suppressPushes()
-                            current.setMediaItem(item, position)
-                            current.prepare()
-                            current.play()
+        val syncer = PlaybackSync(
+            player = exo,
+            sync = sync,
+            scope = scope,
+            onEpisodeEnded = { episodeKey ->
+                scope.launch {
+                    val next = runCatching { playlists.onEpisodeFinished(episodeKey) }.getOrNull()
+                    if (next != null) {
+                        val item = browser.resolvePlayable(next)
+                        val position = runCatching { sync.positionForPlayback(next) }.getOrDefault(0L)
+                        if (item != null) {
+                            withContext(Dispatchers.Main) {
+                                val current = player ?: return@withContext
+                                playbackSync?.suppressPushes()
+                                current.setMediaItem(item, position)
+                                current.prepare()
+                                current.play()
+                            }
                         }
                     }
+                    downloads.enqueue()
                 }
-                downloads.enqueue()
-            }
-        }
+            },
+            onAdoptIdle = { scope.launch { adoptLatestIfIdle() } },
+        )
         playbackSync = syncer
         syncer.start()
-        val sessionActivity = packageManager.getLaunchIntentForPackage(packageName)?.let { intent ->
-            PendingIntent.getActivity(
-                this,
-                0,
-                intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-        }
+        val sessionActivity = sessionActivityIntent()
         if (librarySession == null) {
             librarySession = MediaLibrarySession.Builder(this, skipTransport(exo), LibraryCallback())
                 .setId("nahtlos")
-                .apply { if (sessionActivity != null) setSessionActivity(sessionActivity) }
+                .setSessionActivity(sessionActivity)
+                .setExtras(AutomotiveSession.extras(SERVICE_CLASS))
                 .build()
+            publishSessionExtras()
         }
         scope.launch(Dispatchers.IO) {
             runCatching { sync.pullAndMerge(force = true) }
+            adoptLatestIfIdle()
             warmContinueListening()
+        }
+    }
+
+    /**
+     * Lädt die zuletzt gehörte Folge, solange hier nichts läuft.
+     * Das andere Gerät gibt Folge und Position vor. Ein laufender Player bleibt unangetastet.
+     */
+    private suspend fun adoptLatestIfIdle() {
+        adoptGate.withLock {
+            if (withContext(Dispatchers.Main.immediate) { playerIsBusy() }) return
+            val current = withContext(Dispatchers.Main.immediate) {
+                player?.currentMediaItem?.mediaId?.takeIf { !LibraryIds.isFolder(it) }
+            }
+            val decision = withContext(Dispatchers.IO) {
+                val rows = runCatching { sync.storedProgress() }.getOrDefault(emptyList())
+                ResumeTarget.decide(
+                    playing = false,
+                    currentKey = current,
+                    ownDeviceId = sync.deviceId(),
+                    progress = rows,
+                )
+            } ?: return
+            if (LibraryIds.isFolder(decision.episodeKey)) return
+            if (!decision.switchItem) {
+                withContext(Dispatchers.Main.immediate) {
+                    val now = player ?: return@withContext
+                    if (playerIsBusy() || now.currentMediaItem?.mediaId != decision.episodeKey) return@withContext
+                    if (kotlin.math.abs(now.currentPosition - decision.positionMs) < 1_500) return@withContext
+                    playbackSync?.suppressPushes()
+                    now.seekTo(decision.positionMs.coerceAtLeast(0))
+                }
+                return
+            }
+            val item = withContext(Dispatchers.IO) {
+                runCatching { browser.resolvePlayable(decision.episodeKey) }.getOrNull()
+            } ?: return
+            withContext(Dispatchers.Main.immediate) {
+                val now = player ?: return@withContext
+                if (playerIsBusy()) return@withContext
+                if (now.currentMediaItem?.mediaId == decision.episodeKey) {
+                    if (kotlin.math.abs(now.currentPosition - decision.positionMs) >= 1_500) {
+                        playbackSync?.suppressPushes()
+                        now.seekTo(decision.positionMs.coerceAtLeast(0))
+                    }
+                    return@withContext
+                }
+                playbackSync?.suppressPushes()
+                now.playWhenReady = false
+                now.setMediaItem(item, decision.positionMs.coerceAtLeast(0))
+                now.prepare()
+            }
+        }
+    }
+
+    private fun playerIsBusy(): Boolean {
+        val exo = player ?: return true
+        if (exo.playbackState == Player.STATE_IDLE || exo.playbackState == Player.STATE_ENDED) return false
+        return exo.isPlaying || exo.playWhenReady
+    }
+
+    private fun sessionActivityIntent(): PendingIntent {
+        val automotive = packageManager.hasSystemFeature(AUTOMOTIVE)
+        val intent = if (automotive) {
+            AutomotiveSession.playerIntent(packageName)
+        } else {
+            packageManager.getLaunchIntentForPackage(packageName)
+                ?: Intent(Intent.ACTION_MAIN).setPackage(packageName)
+        }
+        val pending = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        if (automotive) playerLaunch = pending
+        return pending
+    }
+
+    private fun publishSessionExtras() {
+        val session = librarySession ?: return
+        runCatching { session.setSessionExtras(AutomotiveSession.extras(SERVICE_CLASS)) }
+            .onFailure { error -> AppLog.record("Player", "Session-Extras nicht gesetzt: ${error.message}") }
+    }
+
+    private fun openPlayer() {
+        if (!packageManager.hasSystemFeature(AUTOMOTIVE)) return
+        val intent = AutomotiveSession.playerIntent(packageName)
+        try {
+            startActivity(intent)
+        } catch (error: Exception) {
+            AppLog.record("Player", "Ansicht nicht geöffnet: ${error.message}")
+            try {
+                playerLaunch?.send()
+            } catch (sendError: Exception) {
+                AppLog.record("Player", "Ansicht nicht über die Sitzung geöffnet: ${sendError.message}")
+            }
         }
     }
 
@@ -399,6 +506,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
             SessionActions.BOOST,
             SessionActions.INTRO,
             SessionActions.OUTRO,
+            SessionActions.OPEN_PLAYER,
         ).forEach { commands.add(SessionCommand(it, Bundle.EMPTY)) }
         if (Payments.enabled) commands.add(SessionCommand(SessionActions.QUICK_BOOST, Bundle.EMPTY))
         val buttons = carButtons()
@@ -454,6 +562,7 @@ class PodcastMediaLibraryService : MediaLibraryService() {
                 SessionActions.INTRO -> effects?.bumpTrim(intro = true)
                 SessionActions.OUTRO -> effects?.bumpTrim(intro = false)
                 SessionActions.QUICK_BOOST -> quickBoost()
+                SessionActions.OPEN_PLAYER -> openPlayer()
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
@@ -607,5 +716,6 @@ class PodcastMediaLibraryService : MediaLibraryService() {
 
     companion object {
         private const val AUTOMOTIVE = "android.hardware.type.automotive"
+        private const val SERVICE_CLASS = "de.jenz.nahtlos.core.playback.PodcastMediaLibraryService"
     }
 }

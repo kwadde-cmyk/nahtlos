@@ -12,4 +12,5 @@ object SessionActions {
     const val INTRO = "nahtlos.intro"
     const val OUTRO = "nahtlos.outro"
     const val QUICK_BOOST = "nahtlos.quick_boost"
+    const val OPEN_PLAYER = "nahtlos.open_player"
 }

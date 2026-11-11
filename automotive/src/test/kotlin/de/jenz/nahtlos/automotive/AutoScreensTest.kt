@@ -41,6 +41,13 @@ class AutoScreensTest {
     }
 
     @Test
+    fun driveTargetsStayLargeEnoughForTheCar() {
+        assertTrue(AutoDrive.MIN_TOUCH_DP >= 76)
+        assertTrue(AutoDrive.LABEL_SP >= 24)
+        assertTrue(AutoDrive.TITLE_SP >= 32)
+    }
+
+    @Test
     fun mediaTemplatePointsAtThisAppsBrowser() {
         val component = MediaCenterExit.component("de.jenz.nahtlos.automotive")
         assertEquals(

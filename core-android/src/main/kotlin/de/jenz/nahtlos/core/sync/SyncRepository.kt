@@ -287,6 +287,9 @@ class SyncRepository @Inject constructor(
     suspend fun localPosition(episodeKey: String): Long =
         db.progress().get(episodeKey)?.positionMs ?: 0L
 
+    /** Alles, was dieses Gerät an Fortschritt kennt, inklusive gerade gezogener fremder Folgen. */
+    suspend fun storedProgress(): List<EpisodeProgress> = db.progress().all().map { it.toModel() }
+
     /**
      * Asks the server without blocking playback. Returns a position only when the remote
      * document is newer than the local one. Cancellation is not swallowed, and the wait
