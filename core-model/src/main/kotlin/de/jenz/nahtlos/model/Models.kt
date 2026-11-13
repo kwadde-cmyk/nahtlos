@@ -298,6 +298,46 @@ data class WalletOpenResponse(val sessionId: String, val expiresIn: Int)
 data class WalletCipherRequest(val ciphertext: String)
 
 @Serializable
+data class NostrIdentityBody(
+    val pubkey: String,
+    val name: String = "",
+    val picture: String? = null,
+    val updatedAt: Long = 0,
+)
+
+@Serializable
+data class NostrSignRequest(
+    val id: String,
+    val kind: Int,
+    val content: String,
+    val tags: List<List<String>> = emptyList(),
+    val createdAt: Long,
+)
+
+@Serializable
+data class NostrSignedBody(val event: String)
+
+@Serializable
+data class NostrSignStatus(
+    val id: String,
+    val status: String,
+    val kind: Int = 0,
+    val content: String = "",
+    val tags: List<List<String>> = emptyList(),
+    val createdAt: Long = 0,
+    val expiresIn: Int = 0,
+    val event: String? = null,
+    val error: String? = null,
+) {
+    companion object {
+        const val PENDING = "pending"
+        const val SIGNED = "signed"
+        const val EXPIRED = "expired"
+        const val FAILED = "failed"
+    }
+}
+
+@Serializable
 data class WalletPollResponse(
     val status: String,
     val expiresIn: Int? = null,

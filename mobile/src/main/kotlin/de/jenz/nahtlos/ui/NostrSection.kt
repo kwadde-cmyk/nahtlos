@@ -31,7 +31,6 @@ import de.jenz.nahtlos.core.nostr.NostrViewModel
 fun NostrSection(viewModel: NostrViewModel = hiltViewModel()) {
     val ui by viewModel.state.collectAsStateWithLifecycle()
     var relays by remember(ui.relays) { mutableStateOf(ui.relays) }
-    var scanning by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Text("Nostr", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -59,17 +58,13 @@ fun NostrSection(viewModel: NostrViewModel = hiltViewModel()) {
         Spacer(Modifier.height(12.dp))
         Text("Auto", style = MaterialTheme.typography.titleSmall)
         Text(
-            "Im Auto „Nostr-Konto vom Handy“ öffnen und den Code hier scannen. Amber erlaubt die Signatur. Der private Schlüssel bleibt in Amber.",
+            "Das Konto geht über den gekoppelten Server ans Auto. Das Handy signiert danach die Kommentare, Likes und Zaps mit Amber. Ein privater Schlüssel geht nicht an den Server.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        TextButton(onClick = { scanning = !scanning }) { Text(if (scanning) "Scanner schließen" else "Auto-Code scannen") }
-        if (scanning) {
-            QrScanner(onResult = { raw ->
-                if (raw.startsWith("nostrconnect://")) {
-                    scanning = false
-                    viewModel.approveCar(raw)
-                }
-            })
+        if (ui.loggedIn) {
+            Button(onClick = viewModel::shareWithCar, enabled = !ui.busy, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Konto ans Auto geben")
+            }
         }
         OutlinedTextField(
             value = relays,

@@ -49,12 +49,13 @@ class AmberSigner(private val context: Context) {
         return raw to pkg
     }
 
-    suspend fun sign(signerPackage: String, pubkey: String, draft: NostrDraft): SignedEvent {
+    suspend fun sign(signerPackage: String, pubkey: String, draft: NostrDraft, interactive: Boolean = true): SignedEvent {
         val id = Bytes.hex(
             Bytes.sha256(NostrEvent.idPreimage(pubkey, draft.createdAt, draft.kind, draft.tags, draft.content).toByteArray()),
         )
         val unsigned = unsignedJson(id, pubkey, draft)
         quietly(signerPackage, unsigned, pubkey, id, draft)?.let { return it }
+        if (!interactive) throw NostrException("Amber will eine Bestätigung auf dem Handy.")
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$unsigned")).apply {
             `package` = signerPackage
             putExtra("type", "sign_event")

@@ -25,7 +25,7 @@ data class StoredIdentity(
 ) {
     val amber: Boolean get() = !signerPackage.isNullOrBlank() && userPubkey.length == 64
     val bunker: Boolean get() = !clientSecret.isNullOrBlank() && !remoteSigner.isNullOrBlank() && userPubkey.length == 64
-    val loggedIn: Boolean get() = amber || bunker
+    val loggedIn: Boolean get() = userPubkey.length == 64
 
     override fun toString(): String = "identity:${userPubkey.take(8)} amber=$amber bunker=$bunker"
 }
@@ -67,6 +67,18 @@ class IdentityStore @Inject constructor(@ApplicationContext context: Context) {
             .putString(KEY_CLIENT, offer.clientSecret)
             .putString(KEY_REMOTE, remoteSigner.lowercase())
             .remove(KEY_PKG)
+            .remove(KEY_PENDING)
+            .apply()
+    }
+
+    /** Nur der öffentliche Schlüssel. Fürs Auto, vom Server geholt. */
+    fun savePublic(pubkey: String, name: String, picture: String?) = synchronized(lock) {
+        prefs.edit()
+            .putString(KEY_PUB, pubkey.lowercase())
+            .putString(KEY_NAME, name.take(80))
+            .putString(KEY_PIC, picture?.takeIf { it.startsWith("https://") })
+            .remove(KEY_CLIENT)
+            .remove(KEY_REMOTE)
             .remove(KEY_PENDING)
             .apply()
     }
