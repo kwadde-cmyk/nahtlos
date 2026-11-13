@@ -135,6 +135,7 @@ fun SettingsScreen(
                     onOpenHistory = onOpenBoosts,
                 )
             }
+            NostrSection()
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = url,

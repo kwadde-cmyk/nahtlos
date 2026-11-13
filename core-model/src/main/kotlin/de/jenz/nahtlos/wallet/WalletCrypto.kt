@@ -137,6 +137,48 @@ internal object Secp256k1 {
         return Bytes.hex(Bytes.bytes32(point.x))
     }
 
+    fun verify(pubHex: String, message: ByteArray, signature: ByteArray): Boolean {
+        if (signature.size != 64) return false
+        val rBytes = signature.copyOfRange(0, 32)
+        val r = BigInteger(1, rBytes)
+        val s = BigInteger(1, signature.copyOfRange(32, 64))
+        if (r.signum() <= 0 || r >= P || s.signum() <= 0 || s >= N) return false
+        val px = try {
+            Bytes.parseHex(pubHex)
+        } catch (_: Exception) {
+            return false
+        }
+        if (px.size != 32) return false
+        val point = try {
+            liftX(px, evenY = true)
+        } catch (_: Exception) {
+            return false
+        }
+        val e = BigInteger(1, tagged("BIP0340/challenge", Bytes.concat(rBytes, px, message))).mod(N)
+        val left = try {
+            G.mul(s)
+        } catch (_: Exception) {
+            return false
+        }
+        val combined = if (e.signum() == 0) {
+            left
+        } else {
+            val right = try {
+                point.mul(e)
+            } catch (_: Exception) {
+                return false
+            }
+            val negated = if (right.y.signum() == 0) right else Point(right.x, P.subtract(right.y).mod(P))
+            try {
+                left.add(negated)
+            } catch (_: Exception) {
+                return false
+            }
+        }
+        if (combined.y.testBit(0)) return false
+        return combined.x == r
+    }
+
     fun sign(secretHex: String, message: ByteArray, aux: ByteArray): ByteArray {
         require(aux.size == 32)
         val (d, point) = evenPoint(scalar(secretHex))

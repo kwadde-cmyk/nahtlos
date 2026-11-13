@@ -56,6 +56,7 @@ import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.SettingsViewModel
 import de.jenz.nahtlos.core.playback.AutomotiveSetup
+import de.jenz.nahtlos.core.nostr.NostrViewModel
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.wallet.formatSats
 import de.jenz.nahtlos.feed.EpisodeHorizon
@@ -91,6 +92,7 @@ private fun CarSettings(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val walletModel: WalletViewModel = hiltViewModel()
+    val nostrModel: NostrViewModel = hiltViewModel()
     val wallet by walletModel.state.collectAsStateWithLifecycle()
     val driving by rememberDriving()
     var url by remember(state.serverUrl) {
@@ -140,7 +142,7 @@ private fun CarSettings(
                     if (next == null) leave() else nav = next
                 },
                 onMediaCenter = leave,
-                showMediaCenter = nav.visible == AutoScreen.Pairing || nav.visible == AutoScreen.Wallet,
+                showMediaCenter = nav.visible == AutoScreen.Pairing || nav.visible == AutoScreen.Wallet || nav.visible == AutoScreen.Nostr,
             )
             when (nav.visible) {
                 AutoScreen.Locked -> Column(Modifier.padding(horizontal = 48.dp, vertical = 28.dp)) {
@@ -174,6 +176,14 @@ private fun CarSettings(
                         )
                     }
                     CarPairing(serverUrl = server, configured = state.configured)
+                }
+                AutoScreen.Nostr -> Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 48.dp, vertical = 12.dp),
+                ) {
+                    CarNostr(nostrModel)
                 }
                 AutoScreen.Wallet -> Column(
                     Modifier
@@ -303,6 +313,17 @@ private fun CarSettings(
                 }
             }
             }
+            Spacer(Modifier.height(16.dp))
+            Text("Nostr", style = MaterialTheme.typography.titleMedium)
+            Button(
+                onClick = { nav = nav.openNostr() },
+                modifier = Modifier.fillMaxWidth().height(76.dp).padding(top = 8.dp),
+            ) { Text("Nostr-Konto vom Handy") }
+            Text(
+                "Kommentare, Likes und Zaps mit dem Konto aus Amber. Nur im Stand. Der Server bekommt dabei nichts.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+            )
             Spacer(Modifier.height(16.dp))
             Text("Puffer für Funklöcher: $buffer Minuten", style = MaterialTheme.typography.titleMedium)
             Text(

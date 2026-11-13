@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
+        <activity
+            android:name=".nostr.SignerBridgeActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <provider
             android:name="de.jenz.nahtlos.core.artwork.ArtworkProvider"
             android:authorities="${applicationId}.artwork"

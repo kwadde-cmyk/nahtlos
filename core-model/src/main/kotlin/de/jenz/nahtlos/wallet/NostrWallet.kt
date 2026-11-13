@@ -118,7 +118,7 @@ data class SignedEvent(
 
 object SecretScrub {
     fun message(text: String?, secret: String? = null): String {
-        var clean = text?.replace(Regex("nostr\\+walletconnect://\\S+"), "[nwc]").orEmpty()
+        var clean = de.jenz.nahtlos.diagnose.DiagnoseText.scrub(text.orEmpty())
         if (!secret.isNullOrBlank() && secret.length >= 8) clean = clean.replace(secret, "[entfernt]")
         return clean.take(280).ifBlank { "Unbekannter Wallet-Fehler" }
     }

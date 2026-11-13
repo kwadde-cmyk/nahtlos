@@ -6,6 +6,8 @@ import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.CrashLog
 import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.artwork.ArtworkStore
+import de.jenz.nahtlos.core.nostr.AmberSigner
+import de.jenz.nahtlos.core.nostr.AmberSignerHolder
 import de.jenz.nahtlos.core.sync.RealtimeSync
 import javax.inject.Inject
 
@@ -19,6 +21,7 @@ class NahtlosApp : Application() {
         AppLog.install(this)
         ArtworkStore.installCoil(this)
         super.onCreate()
+        AmberSignerHolder.signer = AmberSigner(this)
         realtime.start()
     }
 }
