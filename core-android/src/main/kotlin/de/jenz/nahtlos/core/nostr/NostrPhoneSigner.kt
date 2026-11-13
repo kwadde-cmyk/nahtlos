@@ -45,6 +45,7 @@ class NostrPhoneSigner @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
+    private val asked = mutableSetOf<String>()
     @Volatile private var started = false
 
     fun start() {
@@ -52,7 +53,7 @@ class NostrPhoneSigner @Inject constructor(
         started = true
         scope.launch {
             while (true) {
-                runCatching { pass(interactive = false) }
+                runCatching { pass(interactive = true) }
                 delay(12_000)
             }
         }
@@ -64,7 +65,7 @@ class NostrPhoneSigner @Inject constructor(
             ExistingPeriodicWorkPolicy.KEEP,
             request,
         )
-        scope.launch { runCatching { pass(interactive = false) } }
+        scope.launch { runCatching { pass(interactive = true) } }
     }
 
     suspend fun pass(interactive: Boolean) = gate.withLock {
@@ -83,7 +84,7 @@ class NostrPhoneSigner @Inject constructor(
             if (item.status != NostrSignStatus.PENDING) continue
             val draft = NostrDraft(item.kind, item.content, item.tags, item.createdAt)
             val signed = try {
-                signer.sign(current.signerPackage!!, current.userPubkey, draft, interactive)
+                signOne(signer, current.signerPackage!!, current.userPubkey, draft, item.id, interactive)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -103,6 +104,25 @@ class NostrPhoneSigner @Inject constructor(
             }
             runCatching { api.putNostrSigned(server, item.id, signed.toJson()) }
                 .onFailure { AppLog.record("Nostr", "Signatur nicht abgelegt: ${it.nostrMessage()}") }
+        }
+    }
+
+    private suspend fun signOne(
+        signer: AmberSigner,
+        signerPackage: String,
+        pubkey: String,
+        draft: NostrDraft,
+        id: String,
+        interactive: Boolean,
+    ): de.jenz.nahtlos.wallet.SignedEvent {
+        return try {
+            signer.sign(signerPackage, pubkey, draft, interactive = false)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!interactive || id in asked || error.nostrMessage().contains("abgelehnt")) throw error
+            asked += id
+            signer.sign(signerPackage, pubkey, draft, interactive = true)
         }
     }
 
