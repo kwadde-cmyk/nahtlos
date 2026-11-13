@@ -132,11 +132,85 @@ object Nip46Messages {
             createdAt,
         )
 
+    /** Relays aus dem Code zuerst, danach ein paar, auf die Amber sonst ausweicht. */
+    fun listenRelays(offerRelays: List<String>): List<String> {
+        val extra = listOf(
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.nostr.band",
+            "wss://relay.primal.net",
+            "wss://relay.nsec.app",
+        )
+        return (offerRelays + extra).map { it.trim().trimEnd('/') }.filter { it.startsWith("wss://") || it.startsWith("ws://") }
+            .distinct()
+            .take(6)
+    }
+
+    fun relayHost(url: String): String {
+        val rest = url.substringAfter("://", url).substringBefore('/').substringBefore('?')
+        val named = if ('@' in rest) rest.substringAfterLast('@') else rest
+        return named.substringBefore(':').ifBlank { "relay" }
+    }
+
     /** Klartext einer Antwort vom Signer, oder null wenn es nicht unsere ist. */
     fun open(clientSecret: String, event: SignedEvent, expectedId: String? = null): Nip46Reply? {
         if (event.kind != PodcastNostr.KIND_NIP46 || !NostrKeys.valid(event)) return null
-        val plain = runCatching { Nip44.decryptFrom(clientSecret, event.pubkey, event.content) }.getOrNull() ?: return null
-        val obj = runCatching { json.parseToJsonElement(plain).jsonObject }.getOrNull() ?: return null
+        val plain = decrypt(clientSecret, event).text ?: return null
+        return parseReply(plain, event.pubkey, expectedId)
+    }
+
+    /**
+     * Was eine Connect-Antwort taugt, ohne den Klartext nach außen zu geben.
+     * Amber schickt `ack` oder das Kennwort aus `nostrconnect://`. Beides gilt.
+     * NIP-44 zuerst, NIP-04 nur wenn das nicht aufgeht.
+     */
+    fun readConnect(clientSecret: String, event: SignedEvent, authToken: String): ConnectReading {
+        if (event.kind != PodcastNostr.KIND_NIP46) return ConnectReading(null, "falsches-kind", "keins")
+        if (!NostrKeys.valid(event)) return ConnectReading(null, "signatur", "keins")
+        val opened = decrypt(clientSecret, event)
+        val plain = opened.text ?: return ConnectReading(null, "fehlgeschlagen", "keins")
+        val reply = parseReply(plain, event.pubkey) ?: return ConnectReading(null, opened.scheme, "kein-json")
+        val outcome = outcome(reply, plain, authToken)
+        val accepted = event.pubkey.takeIf { outcome == "ack" || outcome == "kennwort" }
+        return ConnectReading(accepted, opened.scheme, outcome)
+    }
+
+    fun connectAck(clientSecret: String, event: SignedEvent, authToken: String): String? =
+        readConnect(clientSecret, event, authToken).acceptedPubkey
+
+    fun timeoutMessage(relaysUp: Int, events: Int, opened: Int): String = when {
+        relaysUp <= 0 -> "Kein Relay erreichbar. Das Auto hat den Code gezeigt, aber keine Verbindung bekommen."
+        events <= 0 -> "Zeit abgelaufen. Die Relays waren verbunden, eine Antwort von Amber kam nicht an."
+        opened <= 0 -> "Zeit abgelaufen. Ein Event kam an, die Entschlüsselung ist fehlgeschlagen."
+        else -> "Zeit abgelaufen. Amber hat geantwortet, die Bestätigung passte nicht zu diesem Code."
+    }
+
+    fun unsignedForSigner(draft: NostrDraft): String = buildString {
+        append("{\"kind\":${draft.kind}")
+        append(",\"created_at\":${draft.createdAt}")
+        append(",\"content\":${NostrEvent.jsonString(draft.content)}")
+        val tags = draft.tags.joinToString(",") { tag ->
+            tag.joinToString(",", prefix = "[", postfix = "]") { NostrEvent.jsonString(it) }
+        }
+        append(",\"tags\":[$tags]}")
+    }
+
+    private fun decrypt(clientSecret: String, event: SignedEvent): Opened {
+        runCatching { Nip44.decryptFrom(clientSecret, event.pubkey, event.content) }.getOrNull()?.let {
+            return Opened("nip44", it)
+        }
+        runCatching { Nip04.decrypt(clientSecret, event.pubkey, event.content) }.getOrNull()?.let {
+            return Opened("nip04", it)
+        }
+        return Opened("fehlgeschlagen", null)
+    }
+
+    private fun parseReply(plain: String, signerPubkey: String, expectedId: String? = null): Nip46Reply? {
+        val trimmed = plain.trim()
+        if (!trimmed.startsWith("{")) {
+            return Nip46Reply(null, null, trimmed, null, emptyList(), signerPubkey)
+        }
+        val obj = runCatching { json.parseToJsonElement(trimmed).jsonObject }.getOrNull() ?: return null
         val id = obj.string("id")
         if (expectedId != null && id != expectedId) return null
         val result = obj["result"]?.let { element ->
@@ -151,33 +225,32 @@ object Nip46Messages {
             result = result,
             error = obj.string("error"),
             params = obj["params"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
-            signerPubkey = event.pubkey,
+            signerPubkey = signerPubkey,
         )
     }
 
-    /**
-     * Amber bestätigt `nostrconnect`, indem das Ergebnis dem Kennwort entspricht
-     * oder ein Connect-Aufruf das Kennwort trägt. Der Autor des Events ist der Signer.
-     */
-    fun connectAck(clientSecret: String, event: SignedEvent, authToken: String): String? {
-        val reply = open(clientSecret, event) ?: return null
-        val confirmed = reply.result == authToken || reply.params.any { it == authToken }
-        return reply.signerPubkey.takeIf { confirmed }
-    }
-
-    fun unsignedForSigner(draft: NostrDraft): String = buildString {
-        append("{\"kind\":${draft.kind}")
-        append(",\"created_at\":${draft.createdAt}")
-        append(",\"content\":${NostrEvent.jsonString(draft.content)}")
-        val tags = draft.tags.joinToString(",") { tag ->
-            tag.joinToString(",", prefix = "[", postfix = "]") { NostrEvent.jsonString(it) }
+    private fun outcome(reply: Nip46Reply, plain: String, authToken: String): String {
+        val result = reply.result?.trim().orEmpty()
+        val token = authToken.trim()
+        if (result.equals("ack", ignoreCase = true) || plain.trim().equals("ack", ignoreCase = true)) return "ack"
+        if (token.isNotEmpty() && (result == token || plain.trim() == token || reply.id == token || reply.params.any { it == token })) {
+            return "kennwort"
         }
-        append(",\"tags\":[$tags]}")
+        return "passt-nicht"
     }
 
     private fun JsonObject.string(name: String): String? =
         this[name]?.jsonPrimitive?.contentOrNull
+
+    private data class Opened(val scheme: String, val text: String?)
 }
+
+/** Ergebnis einer Connect-Antwort. [acceptedPubkey] ist leer, wenn sie nicht gilt. Die Felder enthalten kein Geheimnis. */
+data class ConnectReading(
+    val acceptedPubkey: String?,
+    val scheme: String,
+    val outcome: String,
+)
 
 data class Nip46Reply(
     val id: String?,
