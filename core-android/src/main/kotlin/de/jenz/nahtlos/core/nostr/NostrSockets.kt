@@ -3,13 +3,16 @@ package de.jenz.nahtlos.core.nostr
 import de.jenz.nahtlos.nostr.NostrKeys
 import de.jenz.nahtlos.nostr.PodcastNostr
 import de.jenz.nahtlos.wallet.SignedEvent
+import de.jenz.nahtlos.nostr.Nip46Messages
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -30,18 +33,27 @@ class NostrSockets(private val http: OkHttpClient) {
         }.awaitAll().count { it }
     }
 
-    /** Wartet auf das erste gültige Event, das [take] annimmt. */
+    /** Wartet auf das erste gültige Event, das [take] annimmt. Die Leitung wird neu aufgebaut, wenn sie abreißt. */
     suspend fun await(
         relays: List<String>,
         filter: String,
         outgoing: SignedEvent?,
         timeoutMs: Long,
+        relaysUp: AtomicInteger,
+        events: AtomicInteger,
+        log: (String) -> Unit,
         take: (SignedEvent) -> Boolean,
     ): SignedEvent? = coroutineScope {
         val found = CompletableDeferred<SignedEvent>()
         val jobs = relays.distinct().map { relay ->
             launch {
-                val hit = runCatching { watch(relay, filter, outgoing, timeoutMs, take) }.getOrNull()
+                val hit = try {
+                    watch(relay, filter, outgoing, timeoutMs, relaysUp, events, log, take)
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    null
+                }
                 if (hit != null && !found.isCompleted) found.complete(hit)
             }
         }
@@ -91,23 +103,60 @@ class NostrSockets(private val http: OkHttpClient) {
         filter: String,
         outgoing: SignedEvent?,
         timeoutMs: Long,
+        relaysUp: AtomicInteger,
+        events: AtomicInteger,
+        log: (String) -> Unit,
         take: (SignedEvent) -> Boolean,
     ): SignedEvent? {
-        val socket = connect(relay) ?: return null
-        try {
-            socket.send("""["REQ","nahtlos",$filter]""")
-            if (outgoing != null) socket.send("""["EVENT",${outgoing.toJson()}]""")
-            val deadline = System.nanoTime() + timeoutMs * 1_000_000
-            while (true) {
-                val left = deadline - System.nanoTime()
-                if (left <= 0) return null
-                val text = withTimeoutOrNull((left / 1_000_000).coerceAtLeast(1)) { socket.incoming.receive() } ?: return null
-                val event = PodcastNostr.eventFromRelay(text)?.takeIf { NostrKeys.valid(it) } ?: continue
-                if (take(event)) return event
+        val host = Nip46Messages.relayHost(relay)
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000
+        var toldUp = false
+        var toldDown = false
+        while (System.nanoTime() < deadline) {
+            val socket = connect(relay)
+            if (socket == null) {
+                if (!toldDown) {
+                    log("NIP-46: Relay nicht erreichbar ($host)")
+                    toldDown = true
+                }
+                delay(2_000)
+                continue
             }
-        } finally {
-            socket.close()
+            if (!toldUp) {
+                relaysUp.incrementAndGet()
+                log("NIP-46: Relay verbunden ($host)")
+                toldUp = true
+            }
+            try {
+                socket.send("""["REQ","nahtlos",$filter]""")
+                log("NIP-46: Abo aktiv ($host, Kind 24133)")
+                if (outgoing != null) socket.send("""["EVENT",${outgoing.toJson()}]""")
+                while (System.nanoTime() < deadline) {
+                    val left = deadline - System.nanoTime()
+                    if (left <= 0) return null
+                    val text = try {
+                        withTimeoutOrNull((left / 1_000_000).coerceAtLeast(1)) { socket.incoming.receive() }
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        null
+                    } ?: break
+                    val event = PodcastNostr.eventFromRelay(text) ?: continue
+                    log("NIP-46: Event empfangen ($host, Kind ${event.kind})")
+                    if (!NostrKeys.valid(event)) {
+                        log("NIP-46: Signatur ungültig ($host)")
+                        continue
+                    }
+                    events.incrementAndGet()
+                    if (take(event)) return event
+                }
+            } finally {
+                socket.close()
+            }
+            log("NIP-46: Leitung zu ($host)")
+            delay(1_000)
         }
+        return null
     }
 
     private suspend fun connect(relay: String): Socket? {

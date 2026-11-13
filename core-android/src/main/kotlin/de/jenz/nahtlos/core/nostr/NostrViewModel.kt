@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -90,9 +91,10 @@ class NostrViewModel @Inject constructor(
         carJob = viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, notice = "Warte auf Amber am Handy.", carUri = "")
             try {
-                nostr.connectCar { uri ->
-                    _state.value = _state.value.copy(carUri = uri, notice = "QR am Handy scannen und in Amber erlauben.")
-                }
+                nostr.connectCar(
+                    onUri = { uri -> _state.update { it.copy(carUri = uri) } },
+                    onStatus = { line -> _state.update { it.copy(notice = line) } },
+                )
                 refresh()
                 _state.value = _state.value.copy(busy = false, carUri = "", notice = "Dieses Auto spricht jetzt mit demselben Konto.")
             } catch (error: kotlinx.coroutines.CancellationException) {

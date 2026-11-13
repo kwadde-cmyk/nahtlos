@@ -63,12 +63,17 @@ class NostrRepository @Inject constructor(
         amber.open(offer.uri)
     }
 
-    suspend fun connectCar(onUri: (String) -> Unit) {
+    suspend fun connectCar(onUri: (String) -> Unit, onStatus: (String) -> Unit = {}) {
         val offer = NostrConnectOffer.create(PodcastNostr.sessionRelays(relays()), "Nahtlos Auto")
         identity.savePending(offer)
         try {
             val remote = coroutineScope {
-                val waiting = async { nip46.awaitSigner(offer, 120_000) }
+                val waiting = async {
+                    nip46.awaitSigner(offer, 90_000) { line ->
+                        AppLog.record("Nostr", line)
+                        onStatus(line)
+                    }
+                }
                 onUri(offer.uri)
                 waiting.await()
             }
