@@ -32,6 +32,16 @@ class AutoScreensTest {
     }
 
     @Test
+    fun nostrScreenReturnsToSettingsAndStaysClosedWhileDriving() {
+        val nostr = AutoNav.initial(openPairing = false).openNostr()
+        assertEquals(AutoScreen.Nostr, nostr.visible)
+        assertEquals(AutoScreen.Settings, nostr.back()?.visible)
+        val locked = nostr.withDriving(true)
+        assertEquals(AutoScreen.Locked, locked.visible)
+        assertEquals(AutoScreen.Locked, locked.openNostr().visible)
+    }
+
+    @Test
     fun drivingHidesPairingAndBackLeavesWithoutOpeningIt() {
         val locked = AutoNav.initial(openPairing = true).withDriving(true)
         assertEquals(AutoScreen.Locked, locked.visible)

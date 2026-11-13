@@ -352,6 +352,17 @@ fun PlayerScreen(
                         },
                         onOpenBoosts = onOpenBoosts,
                     )
+                    CommentsSection(
+                        episodeGuid = details.episodeGuid,
+                        podcastGuid = details.podcastGuid,
+                        showTitle = details.podcastTitle,
+                        episodeTitle = details.episodeTitle,
+                        page = null,
+                        zapAddress = (details.episodeValue + details.channelValue).firstOrNull { recipient ->
+                            val address = recipient.address?.trim().orEmpty()
+                            !recipient.fee && '@' in address
+                        }?.address,
+                    )
                     if (boostOpen) {
                         BoostDialog(
                             podcastTitle = details.podcastTitle,

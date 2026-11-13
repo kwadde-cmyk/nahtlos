@@ -61,6 +61,7 @@
 
 # NIP-44 und secp256k1 sind reines Kotlin. R8 soll die Chiffre nicht umbauen.
 -keep class de.jenz.nahtlos.wallet.** { *; }
+-keep class de.jenz.nahtlos.nostr.** { *; }
 
 # HPKE aus BouncyCastle. Der Wallet-Transfer ruft die API direkt auf.
 -keep class org.bouncycastle.crypto.hpke.** { *; }

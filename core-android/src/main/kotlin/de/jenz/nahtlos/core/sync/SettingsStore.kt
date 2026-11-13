@@ -120,6 +120,12 @@ class SettingsStore @Inject constructor(
         awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
+    fun nostrRelays(): String = prefs.getString(KEY_NOSTR_RELAYS, "").orEmpty()
+
+    fun saveNostrRelays(value: String) {
+        prefs.edit().putString(KEY_NOSTR_RELAYS, value.trim().take(2_000)).apply()
+    }
+
     fun serverDeviceId(): String = prefs.getString(KEY_SERVER_DEVICE, "").orEmpty()
 
     fun saveServerDeviceId(id: String) {
@@ -153,5 +159,6 @@ class SettingsStore @Inject constructor(
         private const val KEY_INDEX_KEY = "podcastIndexKey"
         private const val KEY_INDEX_SECRET = "podcastIndexSecret"
         private const val KEY_GESTURE_HINT = "gesturesHintSeen"
+        private const val KEY_NOSTR_RELAYS = "nostrRelays"
     }
 }

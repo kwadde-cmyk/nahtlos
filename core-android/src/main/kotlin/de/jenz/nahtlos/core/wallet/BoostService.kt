@@ -186,6 +186,57 @@ class BoostService @Inject constructor(
         }
     }
 
+    fun ensureBudget(amountSats: Long) {
+        ensurePayments()
+        if (store.readUri() == null) throw WalletException("Kein Wallet verbunden.")
+        if (amountSats < 1) throw WalletException("Der Betrag muss mindestens 1 sat sein.")
+        val spent = store.spentToday()
+        val budget = store.dailyBudget()
+        if (spent + amountSats > budget) {
+            throw WalletException("Tagesbudget erreicht: $spent von $budget sats. Es wurde nichts gesendet.")
+        }
+    }
+
+    /** Zahlt eine fertige Invoice. Die Invoice bleibt in der verschlüsselten Ablage und geht nicht in den Sync. */
+    suspend fun payZapInvoice(
+        amountSats: Long,
+        bolt11: String,
+        podcast: String,
+        episode: String,
+        recipientName: String,
+        address: String,
+    ): String {
+        ensureBudget(amountSats)
+        if (!bolt11.startsWith("lnbc", ignoreCase = true)) throw WalletException("Die Invoice fehlt.")
+        val record = StoredPayment(
+            id = UUID.randomUUID().toString(),
+            atMs = System.currentTimeMillis(),
+            podcast = podcast,
+            episode = episode,
+            message = "",
+            senderName = store.senderName(),
+            totalSats = amountSats,
+            updatedAt = System.currentTimeMillis(),
+            splits = listOf(
+                StoredSplit(
+                    name = recipientName.ifBlank { "Zap" },
+                    type = "lnaddress",
+                    address = address.take(200),
+                    sats = amountSats,
+                    preimage = "",
+                    bolt11 = bolt11,
+                ),
+            ),
+        )
+        store.upsert(record)
+        val view = pay(record)
+        refresh()
+        val line = view.lines.firstOrNull()?.text.orEmpty()
+        if (line.contains("unklar")) return "Zap unklar. Nicht noch einmal senden."
+        if (view.lines.any { it.error }) throw WalletException(line.ifBlank { "Zap nicht gesendet." })
+        return "Zap gesendet: $amountSats sats an ${recipientName.ifBlank { "den Empfänger" }}."
+    }
+
     suspend fun quickBoost(episodeKey: String, positionMs: Long): PaymentView {
         ensurePayments()
         return guard {

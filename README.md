@@ -78,6 +78,16 @@ Wiedergabe: Tempo 0,5× bis 3,0× in 0,1-Schritten (global und pro Podcast), Sti
 
 Podcasting 2.0 im Player, in den Reitern Shownotes, Kapitel, Transkript, Personen und Unterstützen. Über dem Titel steht, was die Folge mitbringt (Live, Kapitel, Transkript, Personen, Unterstützen). Kapitel tippt man zum Springen; das aktuelle Kapitel steht im Player und als Untertitel plus Kapitelbild in der Media-Session, auch im Auto (vor/zurück). Transkript läuft mit und lässt sich durchsuchen. Funding ist ein Unterstützen-Button. Value4Value-Boosts gehen über den eigenen Alby Hub (Nostr Wallet Connect, NIP-47, verschlüsselt mit NIP-44 (Tag encryption nip44_v2, nur wenn das Info-Event des Wallets das nennt)). Den Link `nostr+walletconnect://…` fügt man unter Einstellungen → Wallet & Zahlungen ein oder scannt ihn als QR. Er liegt nur verschlüsselt auf dem Gerät (Android-Keystore) und geht nicht an den Sync-Server, nicht ins Log und nicht in die Diagnose. Ein Boost sitzt im Player unter Unterstützen und auf der Podcast-Seite. Beträge 21, 210 und 2100 sind Vorschläge, der Standard und ein Tagesbudget sind einstellbar. Die Aufteilung folgt `podcast:value` (Folge vor Kanal, `valueTimeSplit` an der Abspielposition, Gebühren zuerst), in ganzen Sats. Node-Empfänger bekommen pay_keysend mit TLV 7629169, LN-Adressen eine Invoice. Routing-Gebühren stehen extra. Ein fehlgeschlagener Split lässt sich erneut senden, bereits gesendete nicht noch einmal. Streaming-Sats pro Minute sind vorbereitet (`action=stream` im Boostagram), aber noch nicht eingeschaltet. Im Auto gibt es denselben Link nur zum Einfügen, ohne QR, und im Media-Center einen Boost-Knopf mit dem Standardbetrag. Podroll-Empfehlungen lassen sich mit einem Tipp abonnieren. Qualität wählt man, wenn der Feed mehrere Enclosures hat. Die Podcast-Index-Suche sitzt unter „Podcast hinzufügen“ und bleibt aus, bis Key und Secret in den Einstellungen stehen. Fehlen Kapitel im Feed, liest die App ID3-Kapitel aus einer heruntergeladenen Datei. Ein Fehler in einem Extra reißt die Wiedergabe nicht mit.
 
+### Nostr
+
+Anmeldung nur über einen externen Signer. Auf dem Telefon ist das Amber (NIP-55, Intents und Content-Provider). Die App erzeugt keinen Schlüssel und nimmt keinen nsec an. Name und Bild kommen aus dem Profil (Kind 0).
+
+Das Auto hat kein Amber. Es erzeugt lokal nur einen Sitzungsschlüssel für NIP-46 und zeigt einen `nostrconnect://`-Code. Das Handy scannt ihn, Amber erlaubt die Signatur. Der Sitzungsschlüssel bleibt auf dem Auto, der Schlüssel des Hörers bleibt in Amber. Weder nsec noch Sitzungsschlüssel gehen an den Sync-Server, ins Log oder in die Diagnose. Der Pi braucht dafür nichts.
+
+Kommentare einer Folge: geschrieben als Kind 1111 mit den Tags aus NIP-22 und NIP-73 (`I`/`i` = `podcast:item:guid:…`, `K`/`k` = `podcast:item:guid`, zusätzlich die Feed-GUID). Gelesen werden dieselben Tags und zusätzlich Kind 1, weil Fountain so schreibt; die Relays enthalten `wss://relay.fountain.fm`. Antworten auf Kind 1111 bleiben Kind 1111, Antworten auf Kind 1 folgen NIP-10. Likes sind Kind 7, Zaps sind NIP-57 und laufen über das vorhandene NWC-Wallet gegen das Tagesbudget. Nach einem Zap steht eine Bestätigung, ein zweites Tippen sendet nicht sofort noch einmal. Die Relays stehen in den Einstellungen, die Voreinstellung ist Fountain, damus, nos.lol, nostr.band und primal.
+
+Im Auto sind Kommentartext und Shownotes nur im Stand sichtbar. Like und Zap bleiben einfache Tasten. Kontakte, Abo-Sync über Relays und Streaming-Sats sind nicht dabei. Der Sync der Wiedergabe läuft weiter über den Pi.
+
 Ein unbehandelter Absturz schreibt den Stacktrace nach `filesDir/last-crash.txt`. Sync- und Player-Fehler schreibt `filesDir/diagnose.txt`. Beides steht unter Einstellungen → Diagnose und lässt sich teilen.
 
 Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt den Namen. OPML-Import und -Export stehen im Menü „⋮“ als Text. „Podcast hinzufügen“ ist ein Button mit Icon und Text und öffnet die RSS-Adresse. Die Playlist sortiert man am Griff links, einmal am Ende des Ziehens, und die neue Reihenfolge geht mit auf den Server. Folgen bearbeitet man über das Icon-Menü an der Zeile und über langes Drücken: die Aktionsleiste zeigt nur Icons, die zum Zustand passen (Playlist dazu oder daraus, Download oder löschen, gehört oder ungehört), mit Beschreibung und Tooltip. Gemischt darf beides stehen. In der Folgenliste eines Podcasts bleibt das Wischen, rechts Gehört und links Playlist. Die Downloads haben kein Wischen. Wischen und langes Drücken erklärt ein Hinweis beim ersten Start; leere Listen sagen, wie man Folgen hineinbekommt.
@@ -228,7 +238,7 @@ Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYS
 ./gradlew :mobile:bundleRelease :automotive:bundleRelease
 ```
 
-Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **5**, versionName **0.1.4**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
+Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **7**, versionName **0.1.6**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3), 5 (0.1.4), 6 (0.1.5). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
 
 R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
 
@@ -281,6 +291,7 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 - Outbox, WorkManager-Flush, Pull beim Session-Start und im Vordergrund, 1,5-Sekunden-Grenze vor dem Play
 - WebSocket, solange die Verbindung steht; Pull bleibt die Quelle der Wahrheit
 - Browse-Baum und geparkte Einrichtung auf AAOS
+- Nostr über Amber auf dem Telefon und über eine NIP-46-Sitzung im Auto: Kommentare (Kind 1111 und Fountain-Kind 1), Likes, Zaps über NWC
 
 ## Was noch nicht da ist
 

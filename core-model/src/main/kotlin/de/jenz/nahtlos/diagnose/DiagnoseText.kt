@@ -20,9 +20,15 @@ object DiagnoseText {
     private val bearer = Regex("(?i)(authorization:\\s*bearer\\s+)\\S+")
     private val tokenParam = Regex("(?i)((?:^|[?&\\s])(?:token|secret|access_token)=)[^\\s&]+")
     private val preimage = Regex("(?i)(preimage[=:]\\s*)[0-9a-f]{16,}")
+    private val nsec = Regex("nsec1[02-9ac-hj-np-z]+", RegexOption.IGNORE_CASE)
+    private val bunker = Regex("bunker://\\S+", RegexOption.IGNORE_CASE)
+    private val nostrConnect = Regex("nostrconnect://\\S+", RegexOption.IGNORE_CASE)
 
     fun scrub(raw: String): String = raw
         .replace(nwc, "[nwc]")
+        .replace(nsec, "[nsec]")
+        .replace(bunker, "[bunker]")
+        .replace(nostrConnect, "[nostrconnect]")
         .replace(invoice, "[invoice]")
         .replace(bearer, "$1[token]")
         .replace(tokenParam, "$1[token]")
@@ -49,6 +55,9 @@ object DiagnoseText {
         if (body.length > MAX_CHARS) return "zu lang"
         val folded = body.lowercase()
         if ("nostr+walletconnect://" in folded) return "Wallet-Link"
+        if (folded.contains("nsec1")) return "Privater Schlüssel"
+        if (folded.contains("bunker://")) return "Bunker"
+        if (folded.contains("nostrconnect://")) return "Nostr-Verbindung"
         if (Regex("\\blnbc[0-9a-z]{8,}").containsMatchIn(folded)) return "Invoice"
         return null
     }

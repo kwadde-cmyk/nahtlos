@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,11 +46,18 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dagger.hilt.android.AndroidEntryPoint
+import androidx.hilt.navigation.compose.hiltViewModel
 import de.jenz.nahtlos.core.Payments
+import de.jenz.nahtlos.core.db.extras
+import de.jenz.nahtlos.core.db.valueRecipients
+import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.nostr.NostrViewModel
 import de.jenz.nahtlos.core.playback.AutomotiveSetup
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.playback.PlayerSnapshot
 import de.jenz.nahtlos.core.wallet.BoostService
+import de.jenz.nahtlos.model.ValueRecipient
+import de.jenz.nahtlos.nostr.PlainNotes
 import de.jenz.nahtlos.sync.BoostSync
 import javax.inject.Inject
 
@@ -61,6 +70,7 @@ private val ButtonShape = RoundedCornerShape(22.dp)
 class NowPlayingActivity : ComponentActivity() {
     @Inject lateinit var player: PlayerConnection
     @Inject lateinit var boosts: BoostService
+    @Inject lateinit var feeds: FeedRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,7 +78,7 @@ class NowPlayingActivity : ComponentActivity() {
             AutoTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                        NowPlaying(player, boosts)
+                        NowPlaying(player, boosts, feeds)
                     }
                 }
             }
@@ -77,12 +87,40 @@ class NowPlayingActivity : ComponentActivity() {
 }
 
 @Composable
-private fun NowPlaying(player: PlayerConnection, boosts: BoostService) {
+private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: FeedRepository) {
     val playback by player.state.collectAsStateWithLifecycle()
+    val driving by rememberDriving()
+    val nostr: NostrViewModel = hiltViewModel()
+    val nostrUi by nostr.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var notes by remember { mutableStateOf("") }
+    var episodeGuid by remember { mutableStateOf<String?>(null) }
+    var podcastGuid by remember { mutableStateOf<String?>(null) }
+    var showTitle by remember { mutableStateOf("") }
+    var page by remember { mutableStateOf<String?>(null) }
+    var zapAddress by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playback.episodeKey) {
+        val key = playback.episodeKey
+        if (key.isNullOrBlank()) {
+            notes = ""
+            episodeGuid = null
+            return@LaunchedEffect
+        }
+        val episode = feeds.getEpisode(key)
+        val podcast = episode?.let { feeds.getPodcast(it.podcastId) }
+        val extra = episode?.extras()
+        notes = PlainNotes.from(extra?.descriptionHtml, episode?.description)
+        episodeGuid = episode?.guid?.trim()?.takeIf { it.isNotEmpty() }
+        podcastGuid = podcast?.podcastGuid
+        showTitle = podcast?.title.orEmpty()
+        page = podcast?.link?.takeIf { it.startsWith("http") }
+        zapAddress = lightningAddress(extra?.value.orEmpty(), podcast?.valueRecipients().orEmpty())
+        episodeGuid?.let { nostr.load(it) }
+    }
     var sending by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(player) { player.connect() }
+    LaunchedEffect(Unit) { nostr.refresh() }
     LaunchedEffect(boosts) {
         boosts.outcome.collect { text ->
             banner = text
@@ -97,12 +135,19 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService) {
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        banner?.let { text ->
+        val headline = nostrUi.notice.ifBlank { banner }
+        headline?.let { text ->
             Text(
                 text,
                 fontSize = AutoDrive.BODY_SP.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = if (text.startsWith(BoostSync.OUTCOME_FAIL) || text.startsWith("Eine Zahlung")) {
+                color = if (
+                    text.startsWith(BoostSync.OUTCOME_FAIL) ||
+                    text.startsWith("Eine Zahlung") ||
+                    text.startsWith("Zap nicht") ||
+                    text.startsWith("Zap unklar") ||
+                    text.contains("Tagesbudget")
+                ) {
                     MaterialTheme.colorScheme.error
                 } else {
                     HoppOrange
@@ -126,14 +171,20 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService) {
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            DriveButton(
-                "Bibliothek und Playlist",
-                filled = true,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { MediaCenterExit.open(context) },
-            )
+            TransportRow {
+                DriveButton(
+                    "Bibliothek",
+                    filled = true,
+                    onClick = { MediaCenterExit.open(context) },
+                )
+                DriveButton(
+                    "Einstellungen",
+                    filled = false,
+                    onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
+                )
+            }
         } else {
-            Cover(playback.artworkUri)
+            Cover(playback.artworkUri, if (driving) 180.dp else 200.dp)
             Text(
                 playback.title.ifBlank { "Folge" },
                 fontSize = AutoDrive.TITLE_SP.sp,
@@ -162,35 +213,60 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService) {
                 modifier = Modifier.padding(top = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
-                Modifier.fillMaxWidth().padding(top = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                DriveButton("−15s", filled = false, modifier = Modifier.weight(1f), onClick = player::seekBack)
+            TransportRow(Modifier.padding(top = 18.dp)) {
+                DriveButton("−15s", filled = false, onClick = player::seekBack)
                 DriveButton(
                     if (playback.isPlaying) "Pause" else "Play",
                     filled = true,
-                    modifier = Modifier.weight(1f),
                     onClick = player::toggle,
                 )
-                DriveButton("+15s", filled = false, modifier = Modifier.weight(1f), onClick = player::seekForward)
+                DriveButton("+15s", filled = false, onClick = player::seekForward)
             }
-            if (Payments.enabled) {
-                DriveButton(
-                    if (sending) "Boost läuft…" else "Boost",
-                    filled = true,
-                    enabled = !sending,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    onClick = {
-                        if (!BoostSync.acceptTap(sending)) return@DriveButton
-                        sending = true
-                        banner = null
-                        if (!player.quickBoost()) {
-                            sending = false
-                            banner = "Boost nicht gesendet. Player nicht bereit."
-                        }
-                    },
-                )
+            val showLike = nostrUi.loggedIn && !episodeGuid.isNullOrBlank()
+            if (showLike || Payments.enabled) {
+            TransportRow(Modifier.padding(top = 16.dp)) {
+                if (showLike) {
+                    DriveButton(
+                        "Like",
+                        filled = false,
+                        onClick = { nostr.likeEpisode(episodeGuid!!, podcastGuid) },
+                    )
+                    if (Payments.enabled && !zapAddress.isNullOrBlank()) {
+                        DriveButton(
+                            nostrUi.zap.label(episodeGuid!!, "Zap"),
+                            filled = true,
+                            enabled = !nostrUi.busy,
+                            onClick = {
+                                nostr.zap(
+                                    target = episodeGuid!!,
+                                    address = zapAddress!!,
+                                    sats = nostr.defaultSats(),
+                                    podcast = showTitle,
+                                    episode = playback.title,
+                                    episodeGuid = episodeGuid,
+                                    podcastGuid = podcastGuid,
+                                )
+                            },
+                        )
+                    }
+                }
+                if (Payments.enabled) {
+                    DriveButton(
+                        if (sending) "…" else "Boost",
+                        filled = true,
+                        enabled = !sending,
+                        onClick = {
+                            if (!BoostSync.acceptTap(sending)) return@DriveButton
+                            sending = true
+                            banner = null
+                            if (!player.quickBoost()) {
+                                sending = false
+                                banner = "Boost nicht gesendet. Player nicht bereit."
+                            }
+                        },
+                    )
+                }
+            }
             }
             playback.error?.let {
                 Text(
@@ -201,19 +277,48 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            DriveButton(
-                "Bibliothek",
-                filled = false,
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                onClick = { MediaCenterExit.open(context) },
+            if (!driving && notes.isNotBlank()) {
+                Text(
+                    "Shownotes",
+                    fontSize = AutoDrive.BODY_SP.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+                )
+                Text(
+                    notes,
+                    fontSize = AutoDrive.BODY_SP.sp,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+            CarComments(
+                parked = !driving,
+                episodeGuid = episodeGuid,
+                podcastGuid = podcastGuid,
+                showTitle = showTitle,
+                episodeTitle = playback.title,
+                page = page,
+                nostr = nostr,
             )
+            TransportRow(Modifier.padding(top = 16.dp)) {
+                DriveButton("Bibliothek", filled = false, onClick = { MediaCenterExit.open(context) })
+                DriveButton(
+                    "Einstellungen",
+                    filled = false,
+                    onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
+                )
+            }
         }
-        DriveButton(
-            "Einstellungen",
-            filled = false,
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
-            onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
-        )
+    }
+}
+
+@Composable
+private fun TransportRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Row(
+        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        content()
     }
 }
 
@@ -256,7 +361,10 @@ private fun DriveButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(AutoDrive.MIN_TOUCH_DP.dp),
+        modifier = modifier
+            .padding(horizontal = 2.dp)
+            .width(AutoDrive.BUTTON_WIDTH_DP.dp)
+            .height(AutoDrive.BUTTON_HEIGHT_DP.dp),
         shape = ButtonShape,
         color = if (filled) HoppOrange else Color.Transparent,
         contentColor = if (filled) Ink else HoppOrange,
@@ -270,7 +378,7 @@ private fun DriveButton(
                 fontSize = AutoDrive.LABEL_SP.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -278,10 +386,10 @@ private fun DriveButton(
 }
 
 @Composable
-private fun Cover(uri: String?) {
+private fun Cover(uri: String?, edge: androidx.compose.ui.unit.Dp) {
     if (uri.isNullOrBlank()) {
         Surface(
-            modifier = Modifier.size(240.dp),
+            modifier = Modifier.size(edge),
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
             shadowElevation = 0.dp,
@@ -291,11 +399,17 @@ private fun Cover(uri: String?) {
         AsyncImage(
             model = uri,
             contentDescription = "Cover",
-            modifier = Modifier.size(240.dp).clip(RoundedCornerShape(28.dp)),
+            modifier = Modifier.size(edge).clip(RoundedCornerShape(28.dp)),
             contentScale = ContentScale.Crop,
         )
     }
 }
+
+private fun lightningAddress(episode: List<ValueRecipient>, channel: List<ValueRecipient>): String? =
+    (episode + channel).firstOrNull { recipient ->
+        val address = recipient.address?.trim().orEmpty()
+        !recipient.fee && '@' in address
+    }?.address?.trim()
 
 private fun clock(ms: Long): String {
     val total = (ms.coerceAtLeast(0) / 1000)

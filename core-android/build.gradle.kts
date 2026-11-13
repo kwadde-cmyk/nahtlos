@@ -37,6 +37,7 @@ android {
 dependencies {
     api(project(":core-model"))
     implementation(libs.androidx.core)
+    implementation("androidx.activity:activity:1.9.3")
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.hilt.android)

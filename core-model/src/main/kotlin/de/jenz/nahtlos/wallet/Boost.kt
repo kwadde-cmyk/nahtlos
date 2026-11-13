@@ -232,6 +232,54 @@ object LnurlPay {
         return invoice.pr ?: throw WalletException("LNURL hat keine Invoice geliefert")
     }
 
+    /**
+     * NIP-57: die LNURL-Antwort muss Zaps erlauben. Der signierte Zap-Request
+     * geht als `nostr` an den Callback, die Invoice bleibt beim Aufrufer.
+     */
+    fun zapInvoice(address: String, amountMsat: Long, zapRequestJson: String, fetch: (String) -> String): String {
+        val parts = address.trim().split("@")
+        if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            throw WalletException("LN-Adresse erwartet name@domain.")
+        }
+        val user = URLEncoder.encode(parts[0], StandardCharsets.UTF_8)
+        val host = parts[1].trim()
+        val meta = parse(fetch("https://$host/.well-known/lnurlp/$user"))
+        meta.failure?.let { throw WalletException(it) }
+        if (meta.allowsNostr != true || meta.nostrPubkey.isNullOrBlank()) {
+            throw WalletException("Diese Adresse nimmt keine Zaps an.")
+        }
+        val callback = meta.callback ?: throw WalletException("LNURL ohne callback")
+        val min = meta.minSendable ?: 1000
+        val max = meta.maxSendable ?: Long.MAX_VALUE
+        if (amountMsat < min || amountMsat > max) {
+            throw WalletException("Betrag liegt außerhalb von ${min / 1000}–${max / 1000} sats")
+        }
+        val joiner = if (callback.contains("?")) "&" else "?"
+        val nostr = URLEncoder.encode(zapRequestJson, StandardCharsets.UTF_8)
+        val invoice = parse(fetch("$callback${joiner}amount=$amountMsat&nostr=$nostr"))
+        invoice.failure?.let { throw WalletException(it) }
+        return invoice.pr ?: throw WalletException("LNURL hat keine Invoice geliefert")
+    }
+
+    fun nostrPubkey(address: String, fetch: (String) -> String): String {
+        val parts = address.trim().split("@")
+        if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            throw WalletException("LN-Adresse erwartet name@domain.")
+        }
+        val user = URLEncoder.encode(parts[0], StandardCharsets.UTF_8)
+        val meta = parse(fetch("https://${parts[1].trim()}/.well-known/lnurlp/$user"))
+        meta.failure?.let { throw WalletException(it) }
+        if (meta.allowsNostr != true || meta.nostrPubkey.isNullOrBlank()) {
+            throw WalletException("Diese Adresse nimmt keine Zaps an.")
+        }
+        return meta.nostrPubkey.lowercase()
+    }
+
+    fun allowsZap(body: String): Boolean {
+        val meta = parse(body)
+        return meta.allowsNostr == true && !meta.nostrPubkey.isNullOrBlank()
+    }
+
     private fun parse(body: String): Reply = try {
         json.decodeFromString(body)
     } catch (error: Exception) {
@@ -246,6 +294,8 @@ object LnurlPay {
         val minSendable: Long? = null,
         val maxSendable: Long? = null,
         val commentAllowed: Int? = null,
+        val allowsNostr: Boolean? = null,
+        val nostrPubkey: String? = null,
         val pr: String? = null,
         val reason: String? = null,
         val status: String? = null,
