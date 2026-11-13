@@ -23,6 +23,10 @@ import de.jenz.nahtlos.diagnose.DiagnoseUpload
 import de.jenz.nahtlos.sync.BoostBatchRequest
 import de.jenz.nahtlos.sync.BoostSyncItem
 import de.jenz.nahtlos.model.NahtlosJson
+import de.jenz.nahtlos.model.NostrIdentityBody
+import de.jenz.nahtlos.model.NostrSignRequest
+import de.jenz.nahtlos.model.NostrSignStatus
+import de.jenz.nahtlos.model.NostrSignedBody
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import kotlinx.serialization.encodeToString
@@ -172,6 +176,39 @@ class SyncClient @Inject constructor(
     suspend fun getBoosts(settings: ServerSettings, since: Long?): List<BoostSyncItem> {
         val path = if (since == null) "/v1/boosts" else "/v1/boosts?since=$since"
         return json.decodeFromString(authed(settings, path, "GET", null))
+    }
+
+    suspend fun putNostrIdentity(settings: ServerSettings, pubkey: String, name: String, picture: String?) {
+        authed(settings, "/v1/nostr/identity", "PUT", json.encodeToString(NostrIdentityBody(pubkey, name, picture)))
+    }
+
+    suspend fun getNostrIdentity(settings: ServerSettings): NostrIdentityBody? {
+        return try {
+            json.decodeFromString(authed(settings, "/v1/nostr/identity", "GET", null))
+        } catch (error: SyncHttpException) {
+            if (error.code == 404) null else throw error
+        }
+    }
+
+    suspend fun postNostrDraft(settings: ServerSettings, draft: NostrSignRequest): NostrSignStatus =
+        json.decodeFromString(authed(settings, "/v1/nostr/sign", "POST", json.encodeToString(draft)))
+
+    suspend fun listNostrPending(settings: ServerSettings): List<NostrSignStatus> =
+        json.decodeFromString(authed(settings, "/v1/nostr/sign", "GET", null))
+
+    suspend fun pollNostrSign(settings: ServerSettings, id: String): NostrSignStatus {
+        val path = "/v1/nostr/sign/${java.net.URLEncoder.encode(id, Charsets.UTF_8.name())}"
+        return json.decodeFromString(authed(settings, path, "GET", null))
+    }
+
+    suspend fun putNostrSigned(settings: ServerSettings, id: String, eventJson: String) {
+        val path = "/v1/nostr/sign/${java.net.URLEncoder.encode(id, Charsets.UTF_8.name())}"
+        authed(settings, path, "POST", json.encodeToString(NostrSignedBody(eventJson)))
+    }
+
+    suspend fun failNostrSign(settings: ServerSettings, id: String, error: String) {
+        val path = "/v1/nostr/sign/${java.net.URLEncoder.encode(id, Charsets.UTF_8.name())}/fail"
+        authed(settings, path, "POST", json.encodeToString(ErrorBody(error)))
     }
 
     suspend fun pollWalletRelay(settings: ServerSettings, sessionId: String): WalletPollResponse {

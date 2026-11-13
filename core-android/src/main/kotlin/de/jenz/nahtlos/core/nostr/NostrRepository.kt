@@ -2,14 +2,18 @@ package de.jenz.nahtlos.core.nostr
 
 import de.jenz.nahtlos.core.AppLog
 import de.jenz.nahtlos.core.sync.SettingsStore
+import de.jenz.nahtlos.core.sync.SyncClient
 import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.diagnose.DiagnoseText
 import de.jenz.nahtlos.nostr.CommentAuthor
 import de.jenz.nahtlos.nostr.CommentThread
 import de.jenz.nahtlos.nostr.NostrConnectOffer
 import de.jenz.nahtlos.nostr.NostrDraft
+import de.jenz.nahtlos.model.NostrSignRequest
+import de.jenz.nahtlos.model.NostrSignStatus
 import de.jenz.nahtlos.nostr.NostrException
 import de.jenz.nahtlos.nostr.NostrKeys
+import de.jenz.nahtlos.nostr.NostrQueue
 import de.jenz.nahtlos.nostr.PodcastNostr
 import de.jenz.nahtlos.wallet.LnurlPay
 import de.jenz.nahtlos.wallet.SignedEvent
@@ -36,6 +40,7 @@ class NostrRepository @Inject constructor(
     private val settings: SettingsStore,
     private val identity: IdentityStore,
     private val boosts: BoostService,
+    private val api: SyncClient,
 ) {
     private val sockets = NostrSockets(http)
     private val nip46 = Nip46Client(sockets)
@@ -134,10 +139,34 @@ class NostrRepository @Inject constructor(
     }
 
     suspend fun publish(draft: NostrDraft) {
+        val onThisDevice = identity.read().amber
         val event = sign(draft)
+        if (onThisDevice) publishEvent(event)
+        AppLog.record("Nostr", "Kind ${draft.kind} veröffentlicht.")
+    }
+
+    suspend fun publishEvent(event: SignedEvent) {
         val took = sockets.publish(relays(), event, 8_000)
         if (took == 0) throw NostrException("Kein Relay hat den Beitrag angenommen.")
-        AppLog.record("Nostr", "Kind ${draft.kind} an $took Relays.")
+    }
+
+    suspend fun pushIdentity() {
+        val current = identity.read()
+        if (!current.amber) throw NostrException("Zuerst mit Amber anmelden.")
+        val server = settings.read()
+        if (!server.configured) throw NostrException("Zuerst den Server koppeln.")
+        api.putNostrIdentity(server, current.userPubkey, current.name, current.picture)
+        AppLog.record("Nostr", "Konto ans Auto gegeben, Schlüssel ${current.userPubkey.take(8)}.")
+    }
+
+    suspend fun pullIdentity(): String {
+        val server = settings.read()
+        if (!server.configured) throw NostrException("Zuerst das Handy koppeln. Der Server fehlt.")
+        val found = api.getNostrIdentity(server) ?: throw NostrException("Auf dem Handy liegt noch kein Nostr-Konto.")
+        if (!found.pubkey.matches(Regex("[0-9a-f]{64}"))) throw NostrException("Das Konto vom Server ist ungültig.")
+        identity.savePublic(found.pubkey, found.name, found.picture)
+        refreshProfile()
+        return "Konto ${found.name.ifBlank { found.pubkey.take(8) }} ist auf dem Auto."
     }
 
     suspend fun zap(
@@ -179,6 +208,9 @@ class NostrRepository @Inject constructor(
             val signer = amber ?: throw NostrException("Amber ist gerade nicht erreichbar.")
             return signer.sign(current.signerPackage!!, current.userPubkey, draft)
         }
+        if (settings.read().configured && current.userPubkey.length == 64) {
+            return signViaServer(draft, current.userPubkey)
+        }
         if (current.bunker) {
             val secret = current.clientSecret ?: throw NostrException("Nicht angemeldet.")
             val remote = current.remoteSigner ?: throw NostrException("Nicht angemeldet.")
@@ -206,6 +238,39 @@ class NostrRepository @Inject constructor(
             return event
         }
         throw NostrException("Nicht angemeldet.")
+    }
+
+    private suspend fun signViaServer(draft: NostrDraft, pubkey: String): SignedEvent {
+        val server = settings.read()
+        val id = java.util.UUID.randomUUID().toString()
+        api.postNostrDraft(
+            server,
+            NostrSignRequest(id, draft.kind, draft.content, draft.tags, draft.createdAt),
+        )
+        val deadline = System.currentTimeMillis() + NostrQueue.TTL_MS
+        while (System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(2_000)
+            val row = api.pollNostrSign(server, id)
+            when (row.status) {
+                NostrSignStatus.SIGNED -> {
+                    val event = parseSigned(row.event) ?: throw NostrException("Das Handy hat kein gültiges Event zurückgegeben.")
+                    if (!NostrKeys.valid(event) || event.pubkey != pubkey) {
+                        throw NostrException("Die Signatur passt nicht zum Konto.")
+                    }
+                    return event
+                }
+                NostrSignStatus.FAILED -> throw NostrException(row.error ?: "Das Handy hat abgelehnt.")
+                NostrSignStatus.EXPIRED -> throw NostrException(NostrQueue.TIMEOUT)
+            }
+        }
+        throw NostrException(NostrQueue.TIMEOUT)
+    }
+
+    private fun parseSigned(raw: String?): SignedEvent? {
+        if (raw.isNullOrBlank()) return null
+        val element = runCatching { jsonParser.parseToJsonElement(raw) }.getOrNull() as? kotlinx.serialization.json.JsonObject
+            ?: return null
+        return PodcastNostr.parseEvent(element)
     }
 
     private suspend fun authors(people: Set<String>, relays: List<String>): Map<String, CommentAuthor> {

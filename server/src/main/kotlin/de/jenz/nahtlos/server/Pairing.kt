@@ -47,6 +47,7 @@ class PairingGuard(private val clock: () -> Long) {
     private val failures = ArrayDeque<Hit>()
     private val polls = ArrayDeque<Hit>()
     private val wallet = ArrayDeque<Hit>()
+    private val nostr = ArrayDeque<Hit>()
 
     fun allowStart(ip: String) {
         prune(starts)
@@ -75,6 +76,14 @@ class PairingGuard(private val clock: () -> Long) {
         polls.addLast(Hit(ip, clock()))
     }
 
+    fun allowNostr(ip: String) {
+        prune(nostr)
+        if (nostr.count { it.ip == ip } >= MAX_NOSTR) {
+            throw RateLimitedException("Zu viele Nostr-Anfragen. Ein paar Minuten warten.")
+        }
+        nostr.addLast(Hit(ip, clock()))
+    }
+
     fun allowWallet(ip: String) {
         prune(wallet)
         if (wallet.count { it.ip == ip } >= MAX_WALLET) {
@@ -96,6 +105,7 @@ class PairingGuard(private val clock: () -> Long) {
         const val MAX_FAILURES = 5
         const val MAX_POLLS = 240
         const val MAX_WALLET = 400
+        const val MAX_NOSTR = 600
     }
 }
 
@@ -307,7 +317,7 @@ private fun DeviceRow.toSummary() = DeviceSummary(
     revoked = revoked,
 )
 
-private fun io.ktor.server.routing.RoutingContext.clientIp(): String =
+internal fun io.ktor.server.routing.RoutingContext.clientIp(): String =
     call.request.local.remoteHost.ifBlank { "unknown" }
 
 private fun newCode(database: SyncDatabase, random: SecureRandom, now: Long): String {

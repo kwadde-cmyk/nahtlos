@@ -82,7 +82,7 @@ Podcasting 2.0 im Player, in den Reitern Shownotes, Kapitel, Transkript, Persone
 
 Anmeldung nur über einen externen Signer. Auf dem Telefon ist das Amber (NIP-55, Intents und Content-Provider). Die App erzeugt keinen Schlüssel und nimmt keinen nsec an. Name und Bild kommen aus dem Profil (Kind 0).
 
-Das Auto hat kein Amber. Es erzeugt lokal nur einen Sitzungsschlüssel für NIP-46 und zeigt einen `nostrconnect://`-Code. Das Handy scannt ihn, Amber erlaubt die Signatur. Der Sitzungsschlüssel bleibt auf dem Auto, der Schlüssel des Hörers bleibt in Amber. Weder nsec noch Sitzungsschlüssel gehen an den Sync-Server, ins Log oder in die Diagnose. Der Pi braucht dafür nichts.
+Das Auto hat kein Amber. Das Handy legt nur den öffentlichen Schlüssel und das Profil auf den Sync-Server. Kommentare, Likes und Zaps legt das Auto unsigniert in eine Warteschlange. Das Handy signiert sie mit Amber und veröffentlicht sie. Nach 90 Sekunden ohne Handy ist der Auftrag abgelaufen, und ein Zap wird nicht gezahlt. Nsec und Sitzungsgeheimnisse nimmt der Server nicht an.
 
 Kommentare einer Folge: geschrieben als Kind 1111 mit den Tags aus NIP-22 und NIP-73 (`I`/`i` = `podcast:item:guid:…`, `K`/`k` = `podcast:item:guid`, zusätzlich die Feed-GUID). Gelesen werden dieselben Tags und zusätzlich Kind 1, weil Fountain so schreibt; die Relays enthalten `wss://relay.fountain.fm`. Antworten auf Kind 1111 bleiben Kind 1111, Antworten auf Kind 1 folgen NIP-10. Likes sind Kind 7, Zaps sind NIP-57 und laufen über das vorhandene NWC-Wallet gegen das Tagesbudget. Nach einem Zap steht eine Bestätigung, ein zweites Tippen sendet nicht sofort noch einmal. Die Relays stehen in den Einstellungen, die Voreinstellung ist Fountain, damus, nos.lol, nostr.band und primal.
 
@@ -238,7 +238,7 @@ Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYS
 ./gradlew :mobile:bundleRelease :automotive:bundleRelease
 ```
 
-Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **8**, versionName **0.1.7**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3), 5 (0.1.4), 6 (0.1.5), 7 (0.1.6). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
+Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **9**, versionName **0.1.8**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3), 5 (0.1.4), 6 (0.1.5), 7 (0.1.6), 8 (0.1.7). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
 
 R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
 
@@ -291,7 +291,7 @@ Ein echtes Fahrzeug hängt vom OEM ab (Sideload bei Polestar, Volvo, manchen GM-
 - Outbox, WorkManager-Flush, Pull beim Session-Start und im Vordergrund, 1,5-Sekunden-Grenze vor dem Play
 - WebSocket, solange die Verbindung steht; Pull bleibt die Quelle der Wahrheit
 - Browse-Baum und geparkte Einrichtung auf AAOS
-- Nostr über Amber auf dem Telefon und über eine NIP-46-Sitzung im Auto: Kommentare (Kind 1111 und Fountain-Kind 1), Likes, Zaps über NWC
+- Nostr über Amber auf dem Telefon. Das Auto holt das Konto über den Sync-Server und lässt das Handy signieren: Kommentare, Likes, Zaps über NWC
 
 ## Was noch nicht da ist
 

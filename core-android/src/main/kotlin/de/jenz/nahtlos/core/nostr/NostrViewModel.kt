@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.nostr.CommentAuthor
 import de.jenz.nahtlos.nostr.EpisodeComment
+import de.jenz.nahtlos.nostr.NostrQueue
 import de.jenz.nahtlos.nostr.PodcastNostr
 import de.jenz.nahtlos.nostr.ZapSafety
 import kotlinx.coroutines.Job
@@ -81,9 +82,13 @@ class NostrViewModel @Inject constructor(
         refresh()
     }
 
-    fun approveCar(raw: String) = work {
-        nostr.openCarCode(amber, raw)
-        "Amber öffnet die Anmeldung fürs Auto."
+    fun shareWithCar() = work {
+        nostr.pushIdentity()
+        "Konto liegt auf dem Server. Das Auto kann es holen."
+    }
+
+    fun pullFromPhone() = work {
+        nostr.pullIdentity()
     }
 
     fun startCarOffer() {
@@ -180,8 +185,9 @@ class NostrViewModel @Inject constructor(
             _state.value = _state.value.copy(zap = next, notice = "Schon gezappt. Nochmal tippen sendet erneut.")
             return
         }
+        if (_state.value.busy) return
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, notice = "")
+            _state.value = _state.value.copy(busy = true, notice = if (nostr.identity().amber) "" else NostrQueue.WAITING)
             try {
                 val message = nostr.zap(
                     address, sats, "", podcast, episode, episodeGuid, podcastGuid, eventId, eventKind, eventAuthor,
@@ -201,8 +207,10 @@ class NostrViewModel @Inject constructor(
     }
 
     private fun work(block: suspend () -> String) {
+        if (_state.value.busy) return
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, notice = "")
+            val waiting = !nostr.identity().amber && nostr.identity().loggedIn
+            _state.value = _state.value.copy(busy = true, notice = if (waiting) NostrQueue.WAITING else "")
             try {
                 val message = block()
                 refresh()

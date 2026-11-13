@@ -8,12 +8,14 @@ import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.artwork.ArtworkStore
 import de.jenz.nahtlos.core.nostr.AmberSigner
 import de.jenz.nahtlos.core.nostr.AmberSignerHolder
+import de.jenz.nahtlos.core.nostr.NostrPhoneSigner
 import de.jenz.nahtlos.core.sync.RealtimeSync
 import javax.inject.Inject
 
 @HiltAndroidApp
 class NahtlosApp : Application() {
     @Inject lateinit var realtime: RealtimeSync
+    @Inject lateinit var nostrSigner: NostrPhoneSigner
 
     override fun onCreate() {
         Payments.enabled = BuildConfig.PAYMENTS_ENABLED
@@ -23,5 +25,6 @@ class NahtlosApp : Application() {
         super.onCreate()
         AmberSignerHolder.signer = AmberSigner(this)
         realtime.start()
+        nostrSigner.start()
     }
 }

@@ -1,6 +1,8 @@
 package de.jenz.nahtlos.server
 
 import de.jenz.nahtlos.model.EpisodeProgress
+import de.jenz.nahtlos.model.NostrIdentityBody
+import de.jenz.nahtlos.model.NostrSignStatus
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.ProgressStatus
 import de.jenz.nahtlos.model.ProgressWriteResponse
@@ -15,6 +17,7 @@ import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.sync.BoostSyncItem
 import de.jenz.nahtlos.sync.ProgressResolver
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
@@ -109,6 +112,35 @@ class SyncDatabase(path: String) : AutoCloseable {
                       episode TEXT NOT NULL,
                       recipients_json TEXT NOT NULL,
                       device_id TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS nostr_identity (
+                      id INTEGER PRIMARY KEY CHECK (id = 1),
+                      pubkey TEXT NOT NULL,
+                      name TEXT NOT NULL,
+                      picture TEXT,
+                      updated_at INTEGER NOT NULL,
+                      device_id TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS nostr_sign (
+                      id TEXT PRIMARY KEY,
+                      kind INTEGER NOT NULL,
+                      content TEXT NOT NULL,
+                      tags_json TEXT NOT NULL,
+                      created_at INTEGER NOT NULL,
+                      status TEXT NOT NULL,
+                      event_json TEXT,
+                      error TEXT,
+                      requester_device_id TEXT NOT NULL,
+                      opened_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL
                     )
                     """.trimIndent(),
                 )
@@ -661,6 +693,185 @@ class SyncDatabase(path: String) : AutoCloseable {
         recipients = NahtlosJson.json.decodeFromString<List<de.jenz.nahtlos.sync.BoostRecipientSync>>(getString(7)),
     )
 
+    fun saveNostrIdentity(pubkey: String, name: String, picture: String?, deviceId: String, now: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            INSERT INTO nostr_identity(id, pubkey, name, picture, updated_at, device_id)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              pubkey = excluded.pubkey,
+              name = excluded.name,
+              picture = excluded.picture,
+              updated_at = excluded.updated_at,
+              device_id = excluded.device_id
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, pubkey)
+            statement.setString(2, name)
+            statement.setString(3, picture)
+            statement.setLong(4, now)
+            statement.setString(5, deviceId)
+            statement.executeUpdate()
+        }
+    }
+
+    fun readNostrIdentity(): NostrIdentityBody? = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT pubkey, name, picture, updated_at FROM nostr_identity WHERE id = 1",
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                NostrIdentityBody(
+                    pubkey = rows.getString(1),
+                    name = rows.getString(2),
+                    picture = rows.getString(3),
+                    updatedAt = rows.getLong(4),
+                )
+            }
+        }
+    }
+
+    fun insertNostrDraft(
+        id: String,
+        kind: Int,
+        content: String,
+        tagsJson: String,
+        createdAt: Long,
+        deviceId: String,
+        now: Long,
+        expiresAt: Long,
+    ) = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            INSERT INTO nostr_sign(id, kind, content, tags_json, created_at, status, event_json, error, requester_device_id, opened_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.setInt(2, kind)
+            statement.setString(3, content)
+            statement.setString(4, tagsJson)
+            statement.setLong(5, createdAt)
+            statement.setString(6, deviceId)
+            statement.setLong(7, now)
+            statement.setLong(8, expiresAt)
+            statement.executeUpdate()
+        }
+    }
+
+    fun listPendingNostr(now: Long): List<NostrSignStatus> = synchronized(lock) {
+        markExpiredNostr(now)
+        connection.prepareStatement(
+            """
+            SELECT id, kind, content, tags_json, created_at, expires_at
+            FROM nostr_sign WHERE status = 'pending' AND expires_at >= ? ORDER BY opened_at
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, now)
+            statement.executeQuery().use { rows ->
+                val list = mutableListOf<NostrSignStatus>()
+                while (rows.next()) {
+                    val tags = runCatching {
+                        NahtlosJson.json.decodeFromString(nostrTagSerializer, rows.getString(4))
+                    }.getOrDefault(emptyList())
+                    val expires = rows.getLong(6)
+                    list += NostrSignStatus(
+                        id = rows.getString(1),
+                        status = NostrSignStatus.PENDING,
+                        kind = rows.getInt(2),
+                        content = rows.getString(3),
+                        tags = tags,
+                        createdAt = rows.getLong(5),
+                        expiresIn = ((expires - now) / 1000L).toInt().coerceAtLeast(0),
+                    )
+                }
+                list
+            }
+        }
+    }
+
+    fun readNostrSign(id: String, now: Long): NostrSignStatus? = synchronized(lock) {
+        markExpiredNostr(now)
+        connection.prepareStatement(
+            "SELECT id, status, kind, content, tags_json, created_at, expires_at, event_json, error FROM nostr_sign WHERE id = ?",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                val tags = runCatching {
+                    NahtlosJson.json.decodeFromString(nostrTagSerializer, rows.getString(5))
+                }.getOrDefault(emptyList())
+                val expires = rows.getLong(7)
+                NostrSignStatus(
+                    id = rows.getString(1),
+                    status = rows.getString(2),
+                    kind = rows.getInt(3),
+                    content = rows.getString(4),
+                    tags = tags,
+                    createdAt = rows.getLong(6),
+                    expiresIn = ((expires - now) / 1000L).toInt().coerceAtLeast(0),
+                    event = rows.getString(8),
+                    error = rows.getString(9),
+                )
+            }
+        }
+    }
+
+    /** true, wenn die Signatur neu liegt oder dieselbe schon da war. */
+    fun storeNostrEvent(id: String, eventJson: String, now: Long): Boolean = synchronized(lock) {
+        markExpiredNostr(now)
+        val current = readNostrSignLocked(id) ?: return false
+        if (current.status == NostrSignStatus.SIGNED) return current.event == eventJson
+        if (current.status != NostrSignStatus.PENDING) return false
+        connection.prepareStatement(
+            "UPDATE nostr_sign SET status = 'signed', event_json = ?, error = NULL WHERE id = ? AND status = 'pending'",
+        ).use { statement ->
+            statement.setString(1, eventJson)
+            statement.setString(2, id)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    fun failNostrSign(id: String, error: String, now: Long): Boolean = synchronized(lock) {
+        markExpiredNostr(now)
+        connection.prepareStatement(
+            "UPDATE nostr_sign SET status = 'failed', error = ? WHERE id = ? AND status = 'pending' AND expires_at >= ?",
+        ).use { statement ->
+            statement.setString(1, error.take(200))
+            statement.setString(2, id)
+            statement.setLong(3, now)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    private fun readNostrSignLocked(id: String): NostrSignStatus? =
+        connection.prepareStatement(
+            "SELECT id, status, kind, content, tags_json, created_at, expires_at, event_json, error FROM nostr_sign WHERE id = ?",
+        ).use { statement ->
+            statement.setString(1, id)
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return null
+                NostrSignStatus(
+                    id = rows.getString(1),
+                    status = rows.getString(2),
+                    kind = rows.getInt(3),
+                    content = rows.getString(4),
+                    createdAt = rows.getLong(6),
+                    event = rows.getString(8),
+                    error = rows.getString(9),
+                )
+            }
+        }
+
+    private fun markExpiredNostr(now: Long) {
+        connection.prepareStatement(
+            "UPDATE nostr_sign SET status = 'expired' WHERE status = 'pending' AND expires_at < ?",
+        ).use { statement ->
+            statement.setLong(1, now)
+            statement.executeUpdate()
+        }
+    }
+
     override fun close() {
         synchronized(lock) { connection.close() }
     }
@@ -729,6 +940,8 @@ data class PairingRow(
     val deviceToken: String?,
     val consumed: Int,
 )
+
+private val nostrTagSerializer = ListSerializer(ListSerializer(String.serializer()))
 
 private fun java.sql.ResultSet.toPairing(): PairingRow = PairingRow(
     pairingId = getString(1),
