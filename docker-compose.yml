@@ -11,8 +11,12 @@ services:
       PORT: "8787"
       SYNC_DB: /data/sync.db
       SYNC_TOKEN: ${SYNC_TOKEN:-dev-token-change-me}
+      # Leer lassen: kein Push. Der Dienstkonto-Schlüssel liegt nur in der gemounteten Datei.
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_CREDENTIALS_FILE: ${FCM_CREDENTIALS_FILE:-/fcm/nahtlos-fcm.json}
     volumes:
       - nahtlos-data:/data
+      - ${FCM_CREDENTIALS_HOST:-./server/fcm-absent}:/fcm/nahtlos-fcm.json:ro
     restart: unless-stopped
 
 volumes:

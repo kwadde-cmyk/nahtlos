@@ -74,6 +74,9 @@
 -keep class com.google.crypto.tink.** { *; }
 -keep class androidx.security.crypto.** { *; }
 
+# Firebase-Messaging nur im Telefon-Build. Der Dienst wird über das Manifest angesprochen.
+-keep class de.jenz.nahtlos.push.** { *; }
+
 # android.car liegt auf dem AAOS-Gerät, nicht im APK.
 -dontwarn android.car.**
 

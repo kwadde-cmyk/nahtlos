@@ -33,6 +33,17 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
+      - name: google-services.json aus Secret, falls vorhanden
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set +x
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > mobile/google-services.json
+            echo "google-services.json für den Build geschrieben."
+          else
+            echo "Kein GOOGLE_SERVICES_JSON. Push bleibt aus."
+          fi
       - name: Build debug APKs
         env:
           NAHTLOS_KEYSTORE_BASE64: ${{ secrets.NAHTLOS_KEYSTORE_BASE64 }}

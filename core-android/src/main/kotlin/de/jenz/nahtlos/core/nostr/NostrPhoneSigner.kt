@@ -47,12 +47,38 @@ class NostrPhoneSigner @Inject constructor(
     private val gate = Mutex()
     private val asked = mutableSetOf<String>()
     @Volatile private var started = false
+    @Volatile private var pushToken: String? = null
+    @Volatile private var pushSent: String? = null
+
+    fun registerPushToken(token: String) {
+        val clean = token.trim()
+        if (clean.length !in 20..4_096) return
+        if (clean != pushToken) {
+            pushToken = clean
+            pushSent = null
+        }
+        scope.launch { runCatching { sendPushToken() } }
+    }
+
+    private suspend fun sendPushToken() {
+        val clean = pushToken ?: return
+        if (clean == pushSent) return
+        val server = settings.read()
+        if (!server.configured) return
+        runCatching { api.putPushToken(server, clean) }
+            .onSuccess {
+                pushSent = clean
+                AppLog.record("Nostr", "Push-Registrierung aktualisiert.")
+            }
+            .onFailure { AppLog.record("Nostr", "Push-Registrierung fehlgeschlagen.") }
+    }
 
     fun start() {
         if (started) return
         started = true
         scope.launch {
             while (true) {
+                runCatching { sendPushToken() }
                 runCatching { pass(interactive = true) }
                 delay(12_000)
             }
@@ -65,7 +91,10 @@ class NostrPhoneSigner @Inject constructor(
             ExistingPeriodicWorkPolicy.KEEP,
             request,
         )
-        scope.launch { runCatching { pass(interactive = true) } }
+        scope.launch {
+            runCatching { sendPushToken() }
+            runCatching { pass(interactive = true) }
+        }
     }
 
     suspend fun pass(interactive: Boolean) = gate.withLock {

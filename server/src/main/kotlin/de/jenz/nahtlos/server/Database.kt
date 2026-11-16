@@ -129,6 +129,15 @@ class SyncDatabase(path: String) : AutoCloseable {
                 )
                 statement.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS push_tokens (
+                      device_id TEXT PRIMARY KEY,
+                      token TEXT NOT NULL,
+                      updated_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS nostr_sign (
                       id TEXT PRIMARY KEY,
                       kind INTEGER NOT NULL,
@@ -829,6 +838,30 @@ class SyncDatabase(path: String) : AutoCloseable {
             statement.setString(1, eventJson)
             statement.setString(2, id)
             statement.executeUpdate() > 0
+        }
+    }
+
+    fun savePushToken(deviceId: String, token: String, now: Long) = synchronized(lock) {
+        connection.prepareStatement(
+            """
+            INSERT INTO push_tokens(device_id, token, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, deviceId)
+            statement.setString(2, token)
+            statement.setLong(3, now)
+            statement.executeUpdate()
+        }
+    }
+
+    fun listPushTokens(): List<String> = synchronized(lock) {
+        connection.prepareStatement("SELECT token FROM push_tokens").use { statement ->
+            statement.executeQuery().use { rows ->
+                val list = mutableListOf<String>()
+                while (rows.next()) list += rows.getString(1)
+                list
+            }
         }
     }
 

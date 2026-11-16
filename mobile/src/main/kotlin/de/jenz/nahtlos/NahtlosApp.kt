@@ -10,6 +10,7 @@ import de.jenz.nahtlos.core.nostr.AmberSigner
 import de.jenz.nahtlos.core.nostr.AmberSignerHolder
 import de.jenz.nahtlos.core.nostr.NostrPhoneSigner
 import de.jenz.nahtlos.core.sync.RealtimeSync
+import de.jenz.nahtlos.push.PushRegistration
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -26,5 +27,6 @@ class NahtlosApp : Application() {
         AmberSignerHolder.signer = AmberSigner(this)
         realtime.start()
         nostrSigner.start()
+        PushRegistration.start(this)
     }
 }

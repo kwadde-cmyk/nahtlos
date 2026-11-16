@@ -82,7 +82,25 @@ Podcasting 2.0 im Player, in den Reitern Shownotes, Kapitel, Transkript, Persone
 
 Anmeldung nur über einen externen Signer. Auf dem Telefon ist das Amber (NIP-55, Intents und Content-Provider). Die App erzeugt keinen Schlüssel und nimmt keinen nsec an. Name und Bild kommen aus dem Profil (Kind 0).
 
-Das Auto hat kein Amber. Das Handy legt nur den öffentlichen Schlüssel und das Profil auf den Sync-Server. Kommentare, Likes und Zaps legt das Auto unsigniert in eine Warteschlange. Das Handy signiert sie mit Amber und veröffentlicht sie. Nach 90 Sekunden ohne Handy ist der Auftrag abgelaufen, und ein Zap wird nicht gezahlt. Nsec und Sitzungsgeheimnisse nimmt der Server nicht an.
+Das Auto hat kein Amber. Das Handy legt nur den öffentlichen Schlüssel und das Profil auf den Sync-Server. Kommentare, Likes und Zaps legt das Auto unsigniert in eine Warteschlange. Das Handy meldet sein FCM-Token über die bestehende Kopplung und erneuert es, wenn Firebase ein neues vergibt. Legt das Auto einen Auftrag ab, schickt der Pi einen FCM-Weckruf (HTTP v1, hohe Priorität, nur das Signal `what=sign`, kein Inhalt). Das Handy holt die Warteschlange, signiert mit Amber und veröffentlicht. Nach 90 Sekunden ohne Handy ist der Auftrag abgelaufen, und ein Zap wird nicht gezahlt. Ohne Firebase-Datei und ohne Dienstkonto bleibt der Push aus, WorkManager übernimmt weiter. Nsec, FCM-Token und der Dienstkonto-Schlüssel gehen nicht ins Log.
+
+### Firebase einrichten
+
+1. In der [Firebase Console](https://console.firebase.google.com/) ein Projekt anlegen.
+2. Android-App mit der Paket-ID `de.jenz.nahtlos` hinzufügen. SHA-1 ist für den Weckruf nicht nötig.
+3. `google-services.json` herunterladen und lokal nach `mobile/google-services.json` legen. Die Datei steht in `.gitignore` und kommt nicht ins Repo. Fehlt sie, baut Gradle ohne das Google-Services-Plugin, `FCM_ENABLED` bleibt falsch.
+4. Für GitHub Actions das Secret `GOOGLE_SERVICES_JSON` anlegen: Inhalt ist die Datei **base64-kodiert** (`base64 -w0 mobile/google-services.json`). Der Workflow schreibt sie vor dem Build nach `mobile/google-services.json` und gibt sie nicht aus. Ohne das Secret bleibt der Push im CI-Build aus.
+5. In der Google Cloud Console zum selben Projekt ein Dienstkonto mit der Rolle **Firebase Cloud Messaging API Admin** anlegen (API „Firebase Cloud Messaging“ muss aktiv sein). Schlüssel als JSON herunterladen. Die Datei nicht ins Repo, nicht ins Volume `nahtlos-data` und nicht ins Log.
+6. Auf dem Pi, zum Beispiel nach `/home/pi/nahtlos-fcm.json`, und im Ordner mit `docker-compose.yml`:
+
+```bash
+export FCM_PROJECT_ID=dein-projekt
+export FCM_CREDENTIALS_HOST=/home/pi/nahtlos-fcm.json
+git pull
+docker compose up -d --build
+```
+
+Ohne die beiden Variablen mountet Compose `server/fcm-absent` und der Server bleibt bei „FCM aus“. Das Volume `nahtlos-data` wird nicht ersetzt.
 
 Kommentare einer Folge: geschrieben als Kind 1111 mit den Tags aus NIP-22 und NIP-73 (`I`/`i` = `podcast:item:guid:…`, `K`/`k` = `podcast:item:guid`, zusätzlich die Feed-GUID). Gelesen werden dieselben Tags und zusätzlich Kind 1, weil Fountain so schreibt; die Relays enthalten `wss://relay.fountain.fm`. Antworten auf Kind 1111 bleiben Kind 1111, Antworten auf Kind 1 folgen NIP-10. Likes sind Kind 7, Zaps sind NIP-57 und laufen über das vorhandene NWC-Wallet gegen das Tagesbudget. Nach einem Zap steht eine Bestätigung, ein zweites Tippen sendet nicht sofort noch einmal. Die Relays stehen in den Einstellungen, die Voreinstellung ist Fountain, damus, nos.lol, nostr.band und primal.
 
@@ -95,6 +113,8 @@ Oben bleiben Playlist, Downloads und Einstellungen Icons; langes Drücken zeigt 
 ### AAOS
 
 `automotive` verlangt `android.hardware.type.automotive` und liefert `res/xml/automotive_app_desc.xml` mit `<uses name="media"/>`. Die System-UI zeichnet den Browse-Baum (Weitermachen, Abonnements, Folgen). Der Media-Dienst hängt an `androidx.media3.session.MediaLibraryService` und zusätzlich am Legacy-Action `android.media.browse.MediaBrowserService`, damit das Headunit die App findet. Pakete: `de.jenz.nahtlos` und `de.jenz.nahtlos.automotive`.
+
+Die Wiedergabe ist die Startseite. Like, Zap, Boost, Bibliothek und Einstellungen stehen in einer Reihe, hoch und schmal, über den Shownotes. Auf einem kurzen Hochformat wird das Cover kleiner, damit diese Reihe ohne Scrollen sichtbar bleibt.
 
 Die Wallet-Übergabe ans Auto ist eine eigene, kurzlebige Tabelle `wallet_relay`. Der Server speichert nur das HPKE-Chiffrat, nie den NWC-Link. Die Tabelle entsteht beim Start an der bestehenden SQLite-Datei, eine eigene Migration ist nicht nötig. Hinter dem Nginx Proxy Manager reicht ein neues Server-Image und ein Neustart des Containers. Handy und Auto müssen danach dieselbe Fassung sprechen.
 
@@ -238,7 +258,7 @@ Signatur nur über Umgebung oder `gradle.properties`, nie im Repo: `NAHTLOS_KEYS
 ./gradlew :mobile:bundleRelease :automotive:bundleRelease
 ```
 
-Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **9**, versionName **0.1.8**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3), 5 (0.1.4), 6 (0.1.5), 7 (0.1.6), 8 (0.1.7). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
+Play-Version für beide Module: `gradle/play-version.properties`. Stand: versionCode **10**, versionName **0.1.9**. Vergeben und nicht wiederverwenden: 1 (0.1.0), 2 (0.1.1), 3 (0.1.2), 4 (0.1.3), 5 (0.1.4), 6 (0.1.5), 7 (0.1.6), 8 (0.1.7), 9 (0.1.8). Der nächste Upload erhöht dort `versionCode` um 1. Dieselbe Zahl gilt in beiden Modulen, Play zählt sie aber je applicationId getrennt. `android.hardware.type.automotive` bleibt `required`, das Auto-Bundle ist nur für den Automotive-OS-Track.
 
 R8 ist für Release an. Boosts sind standardmäßig an. Für eine Play-Fassung ohne Wallet:
 
