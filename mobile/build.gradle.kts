@@ -35,6 +35,10 @@ android {
         versionCode = playVersion.getProperty("versionCode").trim().toInt()
         versionName = playVersion.getProperty("versionName").trim()
         buildConfigField("boolean", "PAYMENTS_ENABLED", nahtlosPayments.toString())
+        val googleServices = file("google-services.json")
+        val fcmEnabled = googleServices.isFile && googleServices.length() > 100
+        buildConfigField("boolean", "FCM_ENABLED", fcmEnabled.toString())
+        manifestPlaceholders["fcmEnabled"] = fcmEnabled.toString()
     }
     signingConfigs {
         if (nahtlosReleaseSigning) {
@@ -116,4 +120,10 @@ dependencies {
     implementation(libs.camera.view)
     implementation(libs.concurrent.futures)
     implementation(libs.guava)
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
+}
+
+val googleServicesFile = file("google-services.json")
+if (googleServicesFile.isFile && googleServicesFile.length() > 100) {
+    apply(plugin = "com.google.gms.google-services")
 }

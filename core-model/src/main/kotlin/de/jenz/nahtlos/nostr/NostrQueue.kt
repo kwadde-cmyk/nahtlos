@@ -32,6 +32,13 @@ object NostrQueue {
         return reject(content)
     }
 
+    fun checkPushToken(token: String): String? {
+        val clean = token.trim()
+        if (clean.length !in 20..4_096) return "Token ungültig"
+        if (clean.any { it.isISOControl() || it.isWhitespace() }) return "Token ungültig"
+        return reject(clean)
+    }
+
     fun sameRequest(kind: Int, content: String, createdAt: Long, tags: List<List<String>>, event: SignedEvent): Boolean {
         if (event.kind != kind || event.content != content || event.createdAt != createdAt) return false
         return tags.all { tag -> event.tags.any { it == tag } }

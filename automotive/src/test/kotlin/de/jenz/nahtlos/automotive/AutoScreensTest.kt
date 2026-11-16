@@ -51,6 +51,20 @@ class AutoScreensTest {
     }
 
     @Test
+    fun actionRowFitsAPortraitScreenWithoutScrolling() {
+        val volvo = AutoDrive.actionButtonWidthDp(rowDp = 480, count = 5)
+        val wide = AutoDrive.actionButtonWidthDp(rowDp = 900, count = 5)
+        assertTrue(volvo < AutoDrive.BUTTON_HEIGHT_DP)
+        assertTrue(wide == AutoDrive.BUTTON_WIDTH_DP)
+        val used = volvo * 5 + AutoDrive.ACTION_GAP_DP * 4
+        assertTrue(used <= 480)
+        val portrait = 682
+        val cover = AutoDrive.coverEdgeDp(portrait, driving = false)
+        assertTrue(AutoDrive.CHROME_WITHOUT_COVER_DP + cover <= portrait)
+        assertEquals(AutoDrive.COVER_PARKED_DP, AutoDrive.coverEdgeDp(1100, driving = false))
+    }
+
+    @Test
     fun driveTargetsStayLargeEnoughForTheCar() {
         assertTrue(AutoDrive.MIN_TOUCH_DP >= 76)
         assertTrue(AutoDrive.LABEL_SP >= 24)

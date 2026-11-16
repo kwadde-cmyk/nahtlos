@@ -7,6 +7,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -128,6 +129,8 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
         }
     }
     val something = playback.title.isNotBlank() || !playback.episodeKey.isNullOrBlank()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val coverEdge = AutoDrive.coverEdgeDp(maxHeight.value.toInt(), driving).dp
     Column(
         Modifier
             .fillMaxSize()
@@ -184,7 +187,7 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                 )
             }
         } else {
-            Cover(playback.artworkUri, if (driving) 180.dp else 200.dp)
+            Cover(playback.artworkUri, coverEdge)
             Text(
                 playback.title.ifBlank { "Folge" },
                 fontSize = AutoDrive.TITLE_SP.sp,
@@ -223,19 +226,29 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                 DriveButton("+15s", filled = false, onClick = player::seekForward)
             }
             val showLike = nostrUi.loggedIn && !episodeGuid.isNullOrBlank()
-            if (showLike || Payments.enabled) {
-            TransportRow(Modifier.padding(top = 16.dp)) {
-                if (showLike) {
-                    DriveButton(
-                        "Like",
-                        filled = false,
-                        onClick = { nostr.likeEpisode(episodeGuid!!, podcastGuid) },
-                    )
-                    if (Payments.enabled && !zapAddress.isNullOrBlank()) {
+            val showZap = showLike && Payments.enabled && !zapAddress.isNullOrBlank()
+            val actionCount = 2 + (if (showLike) 1 else 0) + (if (showZap) 1 else 0) + (if (Payments.enabled) 1 else 0)
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                val buttonWidth = AutoDrive.actionButtonWidthDp(maxWidth.value.toInt(), actionCount).dp
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AutoDrive.ACTION_GAP_DP.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (showLike) {
+                        DriveButton(
+                            "Like",
+                            filled = false,
+                            buttonWidth = buttonWidth,
+                            onClick = { nostr.likeEpisode(episodeGuid!!, podcastGuid) },
+                        )
+                    }
+                    if (showZap) {
                         DriveButton(
                             nostrUi.zap.label(episodeGuid!!, "Zap"),
                             filled = true,
                             enabled = !nostrUi.busy,
+                            buttonWidth = buttonWidth,
                             onClick = {
                                 nostr.zap(
                                     target = episodeGuid!!,
@@ -249,24 +262,36 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                             },
                         )
                     }
-                }
-                if (Payments.enabled) {
+                    if (Payments.enabled) {
+                        DriveButton(
+                            if (sending) "…" else "Boost",
+                            filled = true,
+                            enabled = !sending,
+                            buttonWidth = buttonWidth,
+                            onClick = {
+                                if (!BoostSync.acceptTap(sending)) return@DriveButton
+                                sending = true
+                                banner = null
+                                if (!player.quickBoost()) {
+                                    sending = false
+                                    banner = "Boost nicht gesendet. Player nicht bereit."
+                                }
+                            },
+                        )
+                    }
                     DriveButton(
-                        if (sending) "…" else "Boost",
-                        filled = true,
-                        enabled = !sending,
-                        onClick = {
-                            if (!BoostSync.acceptTap(sending)) return@DriveButton
-                            sending = true
-                            banner = null
-                            if (!player.quickBoost()) {
-                                sending = false
-                                banner = "Boost nicht gesendet. Player nicht bereit."
-                            }
-                        },
+                        "Bibliothek",
+                        filled = false,
+                        buttonWidth = buttonWidth,
+                        onClick = { MediaCenterExit.open(context) },
+                    )
+                    DriveButton(
+                        "Einstellungen",
+                        filled = false,
+                        buttonWidth = buttonWidth,
+                        onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
                     )
                 }
-            }
             }
             playback.error?.let {
                 Text(
@@ -299,15 +324,8 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                 page = page,
                 nostr = nostr,
             )
-            TransportRow(Modifier.padding(top = 16.dp)) {
-                DriveButton("Bibliothek", filled = false, onClick = { MediaCenterExit.open(context) })
-                DriveButton(
-                    "Einstellungen",
-                    filled = false,
-                    onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
-                )
-            }
         }
+    }
     }
 }
 
@@ -356,14 +374,14 @@ private fun DriveButton(
     filled: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    buttonWidth: Dp = AutoDrive.BUTTON_WIDTH_DP.dp,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier
-            .padding(horizontal = 2.dp)
-            .width(AutoDrive.BUTTON_WIDTH_DP.dp)
+            .width(buttonWidth)
             .height(AutoDrive.BUTTON_HEIGHT_DP.dp),
         shape = ButtonShape,
         color = if (filled) HoppOrange else Color.Transparent,

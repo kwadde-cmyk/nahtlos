@@ -318,6 +318,9 @@ data class NostrSignRequest(
 data class NostrSignedBody(val event: String)
 
 @Serializable
+data class PushTokenBody(val token: String)
+
+@Serializable
 data class NostrSignStatus(
     val id: String,
     val status: String,

@@ -64,6 +64,7 @@ fun Application.module(
     database: SyncDatabase,
     token: String,
     clock: () -> Long = { System.currentTimeMillis() },
+    nudge: SignNudge = SignNudge.fromEnvironment(database),
 ) {
     val hub = ProgressHub()
     val guard = PairingGuard(clock)
@@ -109,7 +110,7 @@ fun Application.module(
         route("/v1") {
             deviceRoutes(database, clock, guard, random)
             walletRelayRoutes(database, clock, guard)
-            nostrRoutes(database, clock, guard)
+            nostrRoutes(database, clock, guard, nudge)
             boostRoutes(database)
             diagnoseRoutes(database)
             get("/subscriptions") { call.respond(database.listSubscriptions()) }

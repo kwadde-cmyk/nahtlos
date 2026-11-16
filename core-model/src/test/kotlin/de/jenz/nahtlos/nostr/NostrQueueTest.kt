@@ -15,6 +15,8 @@ class NostrQueueTest {
         assertEquals("Wallet-Link", NostrQueue.reject("nostr+walletconnect://aa"))
         assertEquals("Invoice", NostrQueue.reject("lnbc1invoice"))
         assertNull(NostrQueue.reject("Ein normaler Kommentar"))
+        assertEquals("Token ungültig", NostrQueue.checkPushToken("kurz"))
+        assertEquals("Wallet-Link", NostrQueue.checkPushToken("nostr+walletconnect://" + "ab".repeat(20)))
         assertEquals("Diese Art wird nicht signiert", NostrQueue.checkDraft("11111111-1111-1111-1111-111111111111", 3, "x", 10))
         assertEquals(
             "Kommentar ist leer",

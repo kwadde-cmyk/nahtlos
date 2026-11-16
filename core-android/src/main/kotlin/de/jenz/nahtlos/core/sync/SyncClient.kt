@@ -27,6 +27,7 @@ import de.jenz.nahtlos.model.NostrIdentityBody
 import de.jenz.nahtlos.model.NostrSignRequest
 import de.jenz.nahtlos.model.NostrSignStatus
 import de.jenz.nahtlos.model.NostrSignedBody
+import de.jenz.nahtlos.model.PushTokenBody
 import de.jenz.nahtlos.playlist.ListeningPlaylist
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import kotlinx.serialization.encodeToString
@@ -176,6 +177,10 @@ class SyncClient @Inject constructor(
     suspend fun getBoosts(settings: ServerSettings, since: Long?): List<BoostSyncItem> {
         val path = if (since == null) "/v1/boosts" else "/v1/boosts?since=$since"
         return json.decodeFromString(authed(settings, path, "GET", null))
+    }
+
+    suspend fun putPushToken(settings: ServerSettings, token: String) {
+        authed(settings, "/v1/nostr/push", "PUT", json.encodeToString(PushTokenBody(token)))
     }
 
     suspend fun putNostrIdentity(settings: ServerSettings, pubkey: String, name: String, picture: String?) {

@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.server
 
 import de.jenz.nahtlos.model.ErrorBody
+import de.jenz.nahtlos.model.PushTokenBody
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.model.NostrIdentityBody
 import de.jenz.nahtlos.model.NostrSignRequest
@@ -22,7 +23,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonObject
 
-fun Route.nostrRoutes(database: SyncDatabase, clock: () -> Long, guard: PairingGuard) {
+fun Route.nostrRoutes(database: SyncDatabase, clock: () -> Long, guard: PairingGuard, nudge: SignNudge) {
     route("/nostr") {
         put("/identity") {
             guard.allowNostr(clientIp())
@@ -35,6 +36,16 @@ fun Route.nostrRoutes(database: SyncDatabase, clock: () -> Long, guard: PairingG
             val reason = NostrQueue.reject(listOf(pubkey, name, picture.orEmpty()).joinToString(" "))
             if (reason != null) throw IllegalArgumentException(reason)
             database.saveNostrIdentity(pubkey, name, picture, device, clock())
+            call.respond(mapOf("status" to "stored"))
+        }
+
+        put("/push") {
+            guard.allowNostr(clientIp())
+            val device = call.deviceId()
+            val token = call.receive<PushTokenBody>().token.trim()
+            val reason = NostrQueue.checkPushToken(token)
+            if (reason != null) throw IllegalArgumentException(reason)
+            database.savePushToken(device, token, clock())
             call.respond(mapOf("status" to "stored"))
         }
 
@@ -72,6 +83,7 @@ fun Route.nostrRoutes(database: SyncDatabase, clock: () -> Long, guard: PairingG
                 now = now,
                 expiresAt = now + NostrQueue.TTL_MS,
             )
+            nudge.nudge()
             call.respond(
                 NostrSignStatus(
                     id = body.id.trim(),
