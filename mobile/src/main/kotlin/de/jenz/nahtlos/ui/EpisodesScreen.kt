@@ -228,6 +228,7 @@ fun EpisodesScreen(
                     onSwipe = { action, key -> viewModel.act(action, listOf(key)) },
                     onUnsubscribe = { confirmUnsubscribe = true },
                     onBoost = {
+                        walletModel.refresh()
                         walletModel.clearResult()
                         boostOpen = true
                     },

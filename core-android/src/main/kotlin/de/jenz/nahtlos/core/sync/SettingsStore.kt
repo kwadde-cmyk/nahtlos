@@ -5,8 +5,11 @@ import android.content.SharedPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.feed.EpisodeKeys
+import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import de.jenz.nahtlos.playback.PlaybackTuning
+import de.jenz.nahtlos.sync.BoostPrefs
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -126,6 +129,16 @@ class SettingsStore @Inject constructor(
         prefs.edit().putString(KEY_NOSTR_RELAYS, value.trim().take(2_000)).apply()
     }
 
+    fun boostPrefs(): BoostPrefs {
+        val raw = prefs.getString(KEY_BOOST_PREFS, null).orEmpty()
+        if (raw.isBlank()) return BoostPrefs()
+        return runCatching { NahtlosJson.json.decodeFromString<BoostPrefs>(raw) }.getOrDefault(BoostPrefs())
+    }
+
+    fun saveBoostPrefs(next: BoostPrefs) {
+        prefs.edit().putString(KEY_BOOST_PREFS, NahtlosJson.json.encodeToString(next)).apply()
+    }
+
     fun serverDeviceId(): String = prefs.getString(KEY_SERVER_DEVICE, "").orEmpty()
 
     fun saveServerDeviceId(id: String) {
@@ -160,5 +173,6 @@ class SettingsStore @Inject constructor(
         private const val KEY_INDEX_SECRET = "podcastIndexSecret"
         private const val KEY_GESTURE_HINT = "gesturesHintSeen"
         private const val KEY_NOSTR_RELAYS = "nostrRelays"
+        private const val KEY_BOOST_PREFS = "boostPrefs"
     }
 }

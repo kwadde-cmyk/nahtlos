@@ -4,6 +4,7 @@ import de.jenz.nahtlos.model.BootstrapRequest
 import de.jenz.nahtlos.model.BootstrapResponse
 import de.jenz.nahtlos.model.NahtlosJson
 import de.jenz.nahtlos.sync.BoostBatchRequest
+import de.jenz.nahtlos.sync.BoostPrefs
 import de.jenz.nahtlos.sync.BoostRecipientSync
 import de.jenz.nahtlos.sync.BoostSyncItem
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -78,6 +79,52 @@ class BoostRouteTest {
         assertFalse(body.contains("nostr+walletconnect"))
         assertFalse(body.contains("lnbc1"))
         assertFalse(body.contains("preimage"))
+        val noted = http.put("/v1/boosts") {
+            bearerAuth(phone.token)
+            setBody(BoostBatchRequest(listOf(first.copy(id = "noted", updatedAt = 10, message = "Danke fürs Zuhören", senderName = "Ada"))))
+        }
+        assertEquals(HttpStatusCode.OK, noted.status)
+        val wiped = http.put("/v1/boosts") {
+            bearerAuth(car.token)
+            setBody(BoostBatchRequest(listOf(first.copy(id = "noted", updatedAt = 30, message = "", totalSats = 21))))
+        }
+        assertEquals(HttpStatusCode.OK, wiped.status)
+        val notes = NahtlosJson.json.decodeFromString<List<BoostSyncItem>>(
+            http.get("/v1/boosts") { bearerAuth(phone.token) }.bodyAsText(),
+        )
+        val kept = notes.first { it.id == "noted" }
+        assertEquals("Danke fürs Zuhören", kept.message)
+        assertEquals("Ada", kept.senderName)
+        assertEquals(21, kept.totalSats)
+        val leaked = http.put("/v1/boosts") {
+            bearerAuth(phone.token)
+            setBody(BoostBatchRequest(listOf(first.copy(id = "leak", message = "nostr+walletconnect://aa"))))
+        }
+        assertEquals(HttpStatusCode.BadRequest, leaked.status)
+        val emptyPrefs = NahtlosJson.json.decodeFromString<BoostPrefs>(
+            http.get("/v1/boost-prefs") { bearerAuth(phone.token) }.bodyAsText(),
+        )
+        assertTrue(emptyPrefs.phrases.isEmpty())
+        val saved = http.put("/v1/boost-prefs") {
+            bearerAuth(phone.token)
+            setBody(BoostPrefs(listOf("Danke", "Klasse Folge"), nostrComment = true, updatedAt = 50))
+        }
+        assertEquals(HttpStatusCode.OK, saved.status)
+        val olderPrefs = http.put("/v1/boost-prefs") {
+            bearerAuth(car.token)
+            setBody(BoostPrefs(listOf("Alt"), nostrComment = false, updatedAt = 10))
+        }
+        assertEquals(HttpStatusCode.OK, olderPrefs.status)
+        val prefs = NahtlosJson.json.decodeFromString<BoostPrefs>(
+            http.get("/v1/boost-prefs") { bearerAuth(car.token) }.bodyAsText(),
+        )
+        assertEquals(listOf("Danke", "Klasse Folge"), prefs.phrases)
+        assertTrue(prefs.nostrComment)
+        val poisoned = http.put("/v1/boost-prefs") {
+            bearerAuth(phone.token)
+            setBody(BoostPrefs(listOf("nsec1shouldnot"), nostrComment = true, updatedAt = 80))
+        }
+        assertEquals(HttpStatusCode.BadRequest, poisoned.status)
         db.close()
     }
 
@@ -125,7 +172,50 @@ class BoostRouteTest {
         val again = SyncDatabase(path)
         assertEquals(12_000, again.findProgress("ep")?.positionMs)
         assertEquals(1, again.listBoosts(null).size)
+        assertEquals("", again.listBoosts(null).single().message)
         again.close()
+    }
+
+    @Test
+    fun oldBoostTableGainsMessageWithoutLosingRows() {
+        val path = Files.createTempDirectory("nahtlos-boost-old").resolve("sync.db").toString()
+        DriverManager.getConnection("jdbc:sqlite:$path").use { connection ->
+            connection.createStatement().execute(
+                """
+                CREATE TABLE boosts (
+                  id TEXT PRIMARY KEY,
+                  at_ms INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  total_sats INTEGER NOT NULL,
+                  podcast TEXT NOT NULL,
+                  episode TEXT NOT NULL,
+                  recipients_json TEXT NOT NULL,
+                  device_id TEXT NOT NULL
+                )
+                """.trimIndent(),
+            )
+            connection.prepareStatement(
+                "INSERT INTO boosts(id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ).use { statement ->
+                statement.setString(1, "old")
+                statement.setLong(2, 5)
+                statement.setLong(3, 5)
+                statement.setLong(4, 21)
+                statement.setString(5, "Show")
+                statement.setString(6, "Folge")
+                statement.setString(7, """[{"name":"Studio","address":"03aa","sats":21,"status":"gesendet"}]""")
+                statement.setString(8, "handy")
+                statement.executeUpdate()
+            }
+        }
+        val db = SyncDatabase(path)
+        val listed = db.listBoosts(null)
+        assertEquals(1, listed.size)
+        assertEquals("", listed[0].message)
+        db.upsertBoost(listed[0].copy(updatedAt = 9, message = "Nachgezogen"), "handy")
+        assertEquals("Nachgezogen", db.listBoosts(null).single().message)
+        assertEquals(21, db.listBoosts(null).single().totalSats)
+        db.close()
     }
 
     private fun item(updated: Long, status: String) = BoostSyncItem(

@@ -60,6 +60,7 @@ data class PaymentView(
     val lines: List<PaymentLine>,
     val routingMsat: Long,
     val canRetry: Boolean,
+    val message: String = "",
 )
 
 data class WalletUi(
@@ -68,6 +69,9 @@ data class WalletUi(
     val balanceLabel: String = "",
     val methods: List<String> = emptyList(),
     val senderName: String = "Nahtlos",
+    val suggestedSender: String = "Nahtlos",
+    val phrases: List<String> = emptyList(),
+    val nostrComment: Boolean = false,
     val defaultSats: Long = 210,
     val dailyBudget: Long = 5_000,
     val spentToday: Long = 0,
@@ -158,10 +162,14 @@ class WalletStore @Inject constructor(@ApplicationContext context: Context) {
                     atMs = item.atMs,
                     podcast = item.podcast,
                     episode = item.episode,
+                    feedUrl = have?.feedUrl,
+                    feedGuid = have?.feedGuid,
+                    episodeGuid = have?.episodeGuid,
+                    positionSec = have?.positionSec,
                     totalSats = item.totalSats,
                     updatedAt = remoteUpdated,
-                    senderName = have?.senderName.orEmpty(),
-                    message = "",
+                    senderName = item.senderName.ifBlank { have?.senderName.orEmpty() },
+                    message = item.message.ifBlank { have?.message.orEmpty() },
                     splits = item.recipients.map { remote ->
                         val old = matched["${remote.address}|${remote.sats}"]
                         StoredSplit(
@@ -256,5 +264,6 @@ fun StoredPayment.toView(): PaymentView {
         lines = lines,
         routingMsat = routing,
         canRetry = splits.any { it.status == "failed" },
+        message = message,
     )
 }

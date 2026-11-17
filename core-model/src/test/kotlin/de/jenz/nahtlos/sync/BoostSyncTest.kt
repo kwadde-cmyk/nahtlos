@@ -1,5 +1,6 @@
 package de.jenz.nahtlos.sync
 
+import de.jenz.nahtlos.model.NahtlosJson
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -49,8 +50,29 @@ class BoostSyncTest {
     fun aSecondTapWhileSendingIsIgnored() {
         assertTrue(BoostSync.acceptTap(alreadySending = false))
         assertFalse(BoostSync.acceptTap(alreadySending = true))
-        assertEquals("Boost ist raus", BoostSync.outcome(anyFailed = false))
+        assertEquals("Boost gesendet", BoostSync.outcome(anyFailed = false))
         assertEquals("Boost nicht gesendet", BoostSync.outcome(anyFailed = true))
+    }
+
+    @Test
+    fun messageSyncKeepsTextAndRejectsSecretsAndLength() {
+        val withNote = sample().copy(message = "Danke für die Folge", senderName = "Ada")
+        assertEquals(null, BoostSync.rejectReason(withNote))
+        assertEquals("Wallet-Link", BoostSync.rejectReason(withNote.copy(message = "nostr+walletconnect://aa")))
+        assertEquals("Invoice", BoostSync.rejectReason(withNote.copy(senderName = "lnbc1invoice")))
+        assertEquals("Privater Schlüssel", BoostSync.rejectReason(withNote.copy(message = "hier nsec1secret")))
+        assertEquals("Nachricht zu lang", BoostSync.rejectReason(withNote.copy(message = "x".repeat(501))))
+        val kept = BoostSync.retainMessage(withNote, withNote.copy(updatedAt = withNote.updatedAt + 5, message = "", totalSats = 21))
+        assertEquals("Danke für die Folge", kept.message)
+        assertEquals("Ada", kept.senderName)
+        assertEquals(21, kept.totalSats)
+        val replaced = BoostSync.retainMessage(withNote, withNote.copy(updatedAt = withNote.updatedAt + 5, message = "Neu"))
+        assertEquals("Neu", replaced.message)
+        val oldClient = NahtlosJson.json.decodeFromString<BoostSyncItem>(
+            """{"id":"pay-1","atMs":1,"updatedAt":1,"totalSats":1,"podcast":"A","episode":"B","recipients":[]}""",
+        )
+        assertEquals("", oldClient.message)
+        assertEquals("", oldClient.senderName)
     }
 
     private fun sample() = BoostSyncItem(

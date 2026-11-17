@@ -2,6 +2,8 @@ package de.jenz.nahtlos.wallet
 
 import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
+import de.jenz.nahtlos.sync.BoostPrefs
+import de.jenz.nahtlos.sync.BoostPrefsSync
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -84,6 +86,9 @@ class BoostPaymentTest {
         assertEquals("guid-ep", parsed.getValue("episode_guid").jsonPrimitive.content)
         assertEquals(12L, parsed.getValue("ts").jsonPrimitive.long)
         assertEquals("Danke", parsed.getValue("message").jsonPrimitive.content)
+        assertEquals("Jenz", parsed.getValue("sender_name").jsonPrimitive.content)
+        assertEquals("0.2.0", parsed.getValue("app_version").jsonPrimitive.content)
+        assertEquals("Nahtlos", parsed.getValue("app_name").jsonPrimitive.content)
         val records = Boostagram.records(share, meta)
         assertEquals(7629169L, records[0].type)
         assertEquals(body, String(Bytes.parseHex(records[0].valueHex), Charsets.UTF_8))
@@ -108,6 +113,23 @@ class BoostPaymentTest {
             """{"callback":"https://pay.example/lnurl","minSendable":1000,"maxSendable":1000000,"commentAllowed":0}"""
         assertEquals("lnbc-nocomment", LnurlPay.invoice("bob@quiet.example", 21_000, "Hallo", fetch))
         assertFails { LnurlPay.invoice("keine-adresse", 21_000, null, fetch) }
+        assertEquals("Hallo Welt", BoostText.lnurlComment("Hallo Welt das ist zu lang", 10))
+        assertEquals(null, BoostText.lnurlComment("Hallo", 0))
+        assertEquals(null, BoostText.lnurlComment("   ", 20))
+        val clipped = BoostText.message("  " + "a".repeat(800))
+        assertEquals(BoostText.MESSAGE_MAX, clipped.length)
+        assertEquals("Ada", BoostSender.resolve("Nahtlos", "Ada", nostrConnected = true))
+        assertEquals("Nahtlos", BoostSender.resolve("", "", nostrConnected = false))
+        assertEquals("Im Auto", BoostSender.resolve("Im Auto", "", nostrConnected = true))
+        val phrases = BoostText.phrases(listOf("  Danke  ", "Danke", "x".repeat(80), "", "Noch eins"))
+        assertEquals(listOf("Danke", "x".repeat(BoostText.PHRASE_MAX), "Noch eins"), phrases)
+        assertEquals(null, BoostPrefsSync.reject(BoostPrefsSync.normalize(BoostPrefs(listOf("Danke"), false, 10))))
+        assertEquals("Wallet-Link", BoostPrefsSync.reject(BoostPrefs(listOf("nostr+walletconnect://aa"), false, 10)))
+        val older = BoostPrefs(listOf("Alt"), false, 10)
+        val newer = BoostPrefs(listOf("Neu"), true, 20)
+        assertEquals("Neu", BoostPrefsSync.prefer(older, newer).phrases.single())
+        assertEquals(true, BoostPrefsSync.prefer(older, newer).nostrComment)
+        assertEquals("Neu", BoostPrefsSync.prefer(newer, older).phrases.single())
         val request = NwcRequests.payKeysend(21_000, "03ab", "aa", listOf(TlvRecord(7629169, "abcd")))
         assertTrue(request.contains("\"amount\":21000"))
         assertTrue(request.contains("\"type\":7629169"))

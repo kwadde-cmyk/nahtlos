@@ -35,6 +35,7 @@ import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
 import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.wallet.BoostSplits
+import de.jenz.nahtlos.wallet.BoostText
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +58,7 @@ fun BoostDialog(
 ) {
     var amountText by remember(wallet.defaultSats) { mutableStateOf(wallet.defaultSats.toString()) }
     var message by remember { mutableStateOf("") }
-    var sender by remember(wallet.senderName) { mutableStateOf(wallet.senderName) }
+    var sender by remember(wallet.suggestedSender) { mutableStateOf(wallet.suggestedSender) }
     val amount = amountText.toLongOrNull()
     var armed by remember { mutableStateOf(false) }
     LaunchedEffect(busy, result, error) {
@@ -88,6 +89,9 @@ fun BoostDialog(
                     val failed = result.lines.any { it.error }
                     Text(BoostSync.outcome(failed), style = MaterialTheme.typography.headlineMedium)
                     Text("${result.totalSats} sats · ${result.podcast}", modifier = Modifier.padding(top = 8.dp))
+                    if (result.message.isNotBlank()) {
+                        Text(result.message, modifier = Modifier.padding(top = 8.dp))
+                    }
                     result.lines.forEach { line ->
                         Text(
                             line.text,
@@ -133,13 +137,18 @@ fun BoostDialog(
                 )
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it.take(200) },
+                    onValueChange = { message = it.take(BoostText.MESSAGE_MAX) },
                     label = { Text("Nachricht (optional)") },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
+                Text(
+                    "Geht per Keysend an die Empfänger. Bei einer Lightning-Adresse kürzt deren Limit den Text.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
                     value = sender,
-                    onValueChange = { sender = it.take(40) },
+                    onValueChange = { sender = it.take(BoostText.SENDER_MAX) },
                     label = { Text("Dein Name (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),

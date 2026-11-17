@@ -74,6 +74,16 @@ fun BoostHistoryScreen(
                         if (entry.episode.isNotBlank()) {
                             Text(entry.episode, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        if (entry.message.isNotBlank()) {
+                            Text(entry.message, modifier = Modifier.padding(top = 4.dp))
+                        }
+                        if (entry.senderName.isNotBlank()) {
+                            Text(
+                                "Von ${entry.senderName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         entry.recipients.forEach { line ->
                             Text(
                                 "${line.name} · ${line.sats} sats · ${line.status}",

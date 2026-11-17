@@ -1,6 +1,7 @@
 package de.jenz.nahtlos.server
 
 import de.jenz.nahtlos.sync.BoostBatchRequest
+import de.jenz.nahtlos.sync.BoostPrefs
 import de.jenz.nahtlos.sync.BoostSync
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
@@ -28,5 +29,17 @@ fun Route.boostRoutes(database: SyncDatabase) {
             database.upsertBoost(item, deviceId)
         }
         call.respond(stored)
+    }
+    get("/boost-prefs") {
+        call.respond(database.readBoostPrefs())
+    }
+    put("/boost-prefs") {
+        val body = call.receive<BoostPrefs>()
+        val deviceId = when (val auth = call.attributes.getOrNull(NahtlosAuthKey)) {
+            is AuthKind.Device -> auth.id
+            AuthKind.Admin -> "admin"
+            else -> "unknown"
+        }
+        call.respond(database.saveBoostPrefs(body, deviceId))
     }
 }

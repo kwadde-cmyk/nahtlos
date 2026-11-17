@@ -13,7 +13,9 @@ import de.jenz.nahtlos.core.db.toSubscription
 import de.jenz.nahtlos.core.feed.FeedRefreshWork
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.playlist.PlaylistRepository
+import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.core.wallet.WalletStore
+import de.jenz.nahtlos.sync.BoostPrefsSync
 import de.jenz.nahtlos.diagnose.DiagnoseText
 import de.jenz.nahtlos.diagnose.DiagnoseUpload
 import de.jenz.nahtlos.core.wallet.toSync
@@ -62,6 +64,7 @@ class SyncRepository @Inject constructor(
     private val feedRefresh: FeedRefreshWork,
     private val playlists: PlaylistRepository,
     private val wallet: WalletStore,
+    private val boosts: BoostService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
@@ -128,6 +131,7 @@ class SyncRepository @Inject constructor(
             }
             try {
                 exchangeBoosts(current)
+                exchangeBoostPrefs(current)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 AppLog.record("Sync", "Boosts: ${e.message?.take(120)}")
@@ -458,6 +462,25 @@ class SyncRepository @Inject constructor(
         val local = wallet.history().map { it.toSync() }
         if (local.isNotEmpty()) api.putBoosts(current, local)
         wallet.mergeRemote(api.getBoosts(current, null))
+        boosts.refresh()
+    }
+
+    private suspend fun exchangeBoostPrefs(current: ServerSettings) {
+        val local = settings.boostPrefs()
+        val remote = try {
+            api.getBoostPrefs(current)
+        } catch (error: SyncHttpException) {
+            if (error.code == 404) return
+            throw error
+        }
+        val chosen = BoostPrefsSync.prefer(local, remote)
+        if (local.updatedAt > remote.updatedAt && local.updatedAt > 0L) {
+            val stored = api.putBoostPrefs(current, local)
+            settings.saveBoostPrefs(stored)
+        } else if (chosen.updatedAt != local.updatedAt || chosen.phrases != local.phrases || chosen.nostrComment != local.nostrComment) {
+            settings.saveBoostPrefs(chosen)
+        }
+        boosts.refresh()
     }
 
     private suspend fun syncProgress(current: ServerSettings) {

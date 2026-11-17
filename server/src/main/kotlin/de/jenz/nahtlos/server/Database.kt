@@ -12,6 +12,9 @@ import de.jenz.nahtlos.playlist.PlaylistResolver
 import de.jenz.nahtlos.playlist.PlaylistWriteResponse
 import de.jenz.nahtlos.feed.EpisodeKeys
 import de.jenz.nahtlos.diagnose.DiagnoseNote
+import de.jenz.nahtlos.wallet.BoostText
+import de.jenz.nahtlos.sync.BoostPrefs
+import de.jenz.nahtlos.sync.BoostPrefsSync
 import de.jenz.nahtlos.sync.BoostRecipientSync
 import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.sync.BoostSyncItem
@@ -111,7 +114,9 @@ class SyncDatabase(path: String) : AutoCloseable {
                       podcast TEXT NOT NULL,
                       episode TEXT NOT NULL,
                       recipients_json TEXT NOT NULL,
-                      device_id TEXT NOT NULL
+                      device_id TEXT NOT NULL,
+                      message TEXT NOT NULL DEFAULT '',
+                      sender_name TEXT NOT NULL DEFAULT ''
                     )
                     """.trimIndent(),
                 )
@@ -155,6 +160,17 @@ class SyncDatabase(path: String) : AutoCloseable {
                 )
                 statement.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS boost_prefs (
+                      id INTEGER PRIMARY KEY CHECK (id = 1),
+                      phrases_json TEXT NOT NULL,
+                      nostr_comment INTEGER NOT NULL DEFAULT 0,
+                      updated_at INTEGER NOT NULL,
+                      device_id TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS progress (
                       episode_key TEXT PRIMARY KEY,
                       podcast_guid TEXT,
@@ -169,6 +185,23 @@ class SyncDatabase(path: String) : AutoCloseable {
                     )
                     """.trimIndent(),
                 )
+            }
+            ensureColumn("boosts", "message", "TEXT NOT NULL DEFAULT ''")
+            ensureColumn("boosts", "sender_name", "TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
+    private fun ensureColumn(table: String, column: String, definition: String) {
+        val names = connection.prepareStatement("PRAGMA table_info($table)").use { statement ->
+            statement.executeQuery().use { rows ->
+                val found = mutableSetOf<String>()
+                while (rows.next()) found += rows.getString(2)
+                found
+            }
+        }
+        if (column !in names) {
+            connection.createStatement().use { statement ->
+                statement.execute("ALTER TABLE $table ADD COLUMN $column $definition")
             }
         }
     }
@@ -637,9 +670,9 @@ class SyncDatabase(path: String) : AutoCloseable {
 
     fun listBoosts(since: Long?): List<BoostSyncItem> = synchronized(lock) {
         val sql = if (since == null) {
-            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts ORDER BY at_ms DESC"
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, message, sender_name FROM boosts ORDER BY at_ms DESC"
         } else {
-            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts WHERE updated_at > ? ORDER BY at_ms DESC"
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, message, sender_name FROM boosts WHERE updated_at > ? ORDER BY at_ms DESC"
         }
         connection.prepareStatement(sql).use { statement ->
             if (since != null) statement.setLong(1, since)
@@ -653,14 +686,12 @@ class SyncDatabase(path: String) : AutoCloseable {
 
     fun upsertBoost(incoming: BoostSyncItem, deviceId: String): BoostSyncItem = synchronized(lock) {
         val current = boostById(incoming.id)
-        val chosen = BoostSync.prefer(current, incoming)
-        if (current != null && chosen.updatedAt == current.updatedAt && chosen.totalSats == current.totalSats && chosen.recipients == current.recipients) {
-            return current
-        }
+        val chosen = BoostSync.retainMessage(current, incoming)
+        if (current != null && chosen == current) return current
         connection.prepareStatement(
             """
-            INSERT INTO boosts(id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, device_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO boosts(id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, device_id, message, sender_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               at_ms = excluded.at_ms,
               updated_at = excluded.updated_at,
@@ -668,7 +699,9 @@ class SyncDatabase(path: String) : AutoCloseable {
               podcast = excluded.podcast,
               episode = excluded.episode,
               recipients_json = excluded.recipients_json,
-              device_id = excluded.device_id
+              device_id = excluded.device_id,
+              message = excluded.message,
+              sender_name = excluded.sender_name
             """.trimIndent(),
         ).use { statement ->
             statement.setString(1, chosen.id)
@@ -679,6 +712,47 @@ class SyncDatabase(path: String) : AutoCloseable {
             statement.setString(6, chosen.episode.take(200))
             statement.setString(7, NahtlosJson.json.encodeToString(ListSerializer(BoostRecipientSync.serializer()), chosen.recipients))
             statement.setString(8, deviceId.take(128))
+            statement.setString(9, chosen.message.take(BoostText.MESSAGE_MAX))
+            statement.setString(10, chosen.senderName.take(BoostText.SENDER_MAX))
+            statement.executeUpdate()
+        }
+        chosen
+    }
+
+    fun readBoostPrefs(): BoostPrefs = synchronized(lock) {
+        connection.prepareStatement(
+            "SELECT phrases_json, nostr_comment, updated_at FROM boost_prefs WHERE id = 1",
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return BoostPrefs()
+                val phrases = runCatching {
+                    NahtlosJson.json.decodeFromString<List<String>>(rows.getString(1))
+                }.getOrDefault(emptyList())
+                BoostPrefs(phrases, rows.getInt(2) != 0, rows.getLong(3))
+            }
+        }
+    }
+
+    fun saveBoostPrefs(incoming: BoostPrefs, deviceId: String): BoostPrefs = synchronized(lock) {
+        val clean = BoostPrefsSync.normalize(incoming)
+        val reason = BoostPrefsSync.reject(clean)
+        if (reason != null) throw IllegalArgumentException(reason)
+        val chosen = BoostPrefsSync.prefer(readBoostPrefs(), clean)
+        connection.prepareStatement(
+            """
+            INSERT INTO boost_prefs(id, phrases_json, nostr_comment, updated_at, device_id)
+            VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              phrases_json = excluded.phrases_json,
+              nostr_comment = excluded.nostr_comment,
+              updated_at = excluded.updated_at,
+              device_id = excluded.device_id
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, NahtlosJson.json.encodeToString(ListSerializer(String.serializer()), chosen.phrases))
+            statement.setInt(2, if (chosen.nostrComment) 1 else 0)
+            statement.setLong(3, chosen.updatedAt)
+            statement.setString(4, deviceId.take(128))
             statement.executeUpdate()
         }
         chosen
@@ -686,7 +760,7 @@ class SyncDatabase(path: String) : AutoCloseable {
 
     private fun boostById(id: String): BoostSyncItem? =
         connection.prepareStatement(
-            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json FROM boosts WHERE id = ?",
+            "SELECT id, at_ms, updated_at, total_sats, podcast, episode, recipients_json, message, sender_name FROM boosts WHERE id = ?",
         ).use { statement ->
             statement.setString(1, id)
             statement.executeQuery().use { rows -> if (rows.next()) rows.toBoost() else null }
@@ -700,6 +774,8 @@ class SyncDatabase(path: String) : AutoCloseable {
         podcast = getString(5),
         episode = getString(6),
         recipients = NahtlosJson.json.decodeFromString<List<de.jenz.nahtlos.sync.BoostRecipientSync>>(getString(7)),
+        message = getString(8).orEmpty(),
+        senderName = getString(9).orEmpty(),
     )
 
     fun saveNostrIdentity(pubkey: String, name: String, picture: String?, deviceId: String, now: Long) = synchronized(lock) {

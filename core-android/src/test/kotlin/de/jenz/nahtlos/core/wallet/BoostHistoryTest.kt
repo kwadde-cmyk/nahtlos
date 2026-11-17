@@ -15,6 +15,8 @@ class BoostHistoryTest {
             atMs = 1_700_000_000_000,
             podcast = "Nodesignal",
             episode = "Recap",
+            message = "Danke für die Folge",
+            senderName = "Ada",
             totalSats = 210,
             splits = listOf(
                 StoredSplit(
@@ -41,6 +43,7 @@ class BoostHistoryTest {
         val history = payment.toHistory()
         assertEquals("Nodesignal", history.podcast)
         assertEquals("Recap", history.episode)
+        assertEquals("Danke für die Folge", history.message)
         assertEquals(210, history.totalSats)
         assertEquals("Studio", history.recipients[0].name)
         assertEquals("03abcdef", history.recipients[0].address)
@@ -52,7 +55,9 @@ class BoostHistoryTest {
         assertFalse(shown.contains(preimage))
         assertFalse(shown.contains("lnbc1"))
         val synced = payment.toSync()
-        val wire = "${synced.podcast}|${synced.episode}|${synced.recipients.joinToString { it.address + it.status }}"
+        assertEquals("Danke für die Folge", synced.message)
+        assertEquals("Ada", synced.senderName)
+        val wire = "${synced.podcast}|${synced.episode}|${synced.message}|${synced.recipients.joinToString { it.address + it.status }}"
         assertFalse(wire.contains(preimage))
         assertFalse(wire.contains("lnbc1"))
         assertFalse(wire.contains("nostr+walletconnect"))

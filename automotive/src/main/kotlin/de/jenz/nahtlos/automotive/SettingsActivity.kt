@@ -59,6 +59,7 @@ import de.jenz.nahtlos.core.playback.AutomotiveSetup
 import de.jenz.nahtlos.core.nostr.NostrViewModel
 import de.jenz.nahtlos.core.wallet.WalletViewModel
 import de.jenz.nahtlos.core.wallet.formatSats
+import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.feed.EpisodeHorizon
 import de.jenz.nahtlos.playback.PlaybackCachePolicy
 import kotlinx.coroutines.Dispatchers
@@ -286,6 +287,10 @@ private fun CarSettings(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
+            Text(
+                "Solange Nostr verbunden ist, steht dein Nostr-Name im Boost. Sonst dieser Name. Kurztexte pflegst du am Handy.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(colors = autoFieldColors(),
                 value = defaultSats,
                 onValueChange = { defaultSats = it.filter { char -> char.isDigit() }.take(7) },
@@ -305,7 +310,11 @@ private fun CarSettings(
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             ) { Text("Beträge speichern") }
             wallet.history.take(5).forEach { payment ->
-                Text("${payment.totalSats} sats · ${payment.podcast}", modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "${BoostSync.formatWhen(payment.atMs, java.time.ZoneId.systemDefault())} · ${payment.totalSats} sats · ${payment.podcast}",
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                if (payment.message.isNotBlank()) Text(payment.message)
                 payment.lines.forEach { line -> Text(line.text, color = if (line.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (payment.routingMsat > 0) Text("Routing ${formatSats(payment.routingMsat)}, extra.")
                 if (payment.canRetry) {

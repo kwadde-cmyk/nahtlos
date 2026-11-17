@@ -310,6 +310,7 @@ fun PlayerScreen(
                             enabled = !wallet.busy,
                             onClick = {
                                 if (wallet.busy) return@Button
+                                walletModel.refresh()
                                 walletModel.clearResult()
                                 boostOpen = true
                             },
@@ -347,6 +348,7 @@ fun PlayerScreen(
                         onSubscribe = viewModel::subscribe,
                         onUseEnclosure = viewModel::useEnclosure,
                         onBoost = {
+                            walletModel.refresh()
                             walletModel.clearResult()
                             boostOpen = true
                         },

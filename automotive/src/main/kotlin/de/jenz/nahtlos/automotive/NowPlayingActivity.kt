@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,13 +57,18 @@ import de.jenz.nahtlos.core.db.valueRecipients
 import de.jenz.nahtlos.core.feed.FeedRepository
 import de.jenz.nahtlos.core.nostr.NostrViewModel
 import de.jenz.nahtlos.core.playback.AutomotiveSetup
+import de.jenz.nahtlos.core.playback.CarControls
 import de.jenz.nahtlos.core.playback.PlayerConnection
 import de.jenz.nahtlos.core.playback.PlayerSnapshot
 import de.jenz.nahtlos.core.wallet.BoostService
 import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.nostr.PlainNotes
 import de.jenz.nahtlos.sync.BoostSync
+import de.jenz.nahtlos.wallet.BoostText
+import de.jenz.nahtlos.wallet.SecretScrub
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private val HoppOrange = Color(0xFFFF7A1A)
 private val Ink = Color(0xFF1A0E00)
@@ -90,7 +98,10 @@ class NowPlayingActivity : ComponentActivity() {
 @Composable
 private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: FeedRepository) {
     val playback by player.state.collectAsStateWithLifecycle()
+    val wallet by boosts.state.collectAsStateWithLifecycle()
     val driving by rememberDriving()
+    val scope = rememberCoroutineScope()
+    var comment by remember(playback.episodeKey) { mutableStateOf("") }
     val nostr: NostrViewModel = hiltViewModel()
     val nostrUi by nostr.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -121,7 +132,10 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
     var sending by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(player) { player.connect() }
-    LaunchedEffect(Unit) { nostr.refresh() }
+    LaunchedEffect(Unit) {
+        nostr.refresh()
+        boosts.refresh()
+    }
     LaunchedEffect(boosts) {
         boosts.outcome.collect { text ->
             banner = text
@@ -134,6 +148,7 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -270,11 +285,25 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                             buttonWidth = buttonWidth,
                             onClick = {
                                 if (!BoostSync.acceptTap(sending)) return@DriveButton
+                                val key = playback.episodeKey
+                                if (key.isNullOrBlank()) {
+                                    banner = "Boost nicht gesendet. Keine Folge in der Wiedergabe."
+                                    return@DriveButton
+                                }
                                 sending = true
                                 banner = null
-                                if (!player.quickBoost()) {
+                                val note = comment
+                                val position = playback.positionMs
+                                scope.launch {
+                                    val text = try {
+                                        boosts.outcomeText(boosts.quickBoost(key, position, note))
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        CarControls.boostNotice(SecretScrub.message(error.message))
+                                    }
+                                    banner = text
                                     sending = false
-                                    banner = "Boost nicht gesendet. Player nicht bereit."
                                 }
                             },
                         )
@@ -292,6 +321,13 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                         onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
                     )
                 }
+            }
+            if (Payments.enabled) {
+                BoostCommentField(
+                    text = comment,
+                    phrases = wallet.phrases,
+                    onText = { comment = it },
+                )
             }
             playback.error?.let {
                 Text(
@@ -420,6 +456,62 @@ private fun Cover(uri: String?, edge: androidx.compose.ui.unit.Dp) {
             modifier = Modifier.size(edge).clip(RoundedCornerShape(28.dp)),
             contentScale = ContentScale.Crop,
         )
+    }
+}
+
+/**
+ * Dieselbe Texteingabe wie die Nostr-Kommentare: normales Textfeld, auch während der Fahrt.
+ * Kurztexte füllen das Feld nur vor.
+ */
+@Composable
+private fun BoostCommentField(
+    text: String,
+    phrases: List<String>,
+    onText: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = text,
+        onValueChange = { onText(it.take(BoostText.MESSAGE_MAX)) },
+        label = { Text("Kommentar zum Boost") },
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = AutoDrive.BODY_SP.sp),
+    )
+    Text(
+        "Optional. Geht mit dem Boost an die Empfänger, auch während der Fahrt.",
+        fontSize = AutoDrive.BODY_SP.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    )
+    if (phrases.isNotEmpty() || text.isNotBlank()) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (text.isNotBlank()) {
+                PhraseChip("Ohne") { onText("") }
+            }
+            phrases.forEach { phrase ->
+                PhraseChip(phrase) { onText(phrase) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhraseChip(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.height(AutoDrive.MIN_TOUCH_DP.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.Transparent,
+        contentColor = HoppOrange,
+        border = BorderStroke(3.dp, HoppOrange),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

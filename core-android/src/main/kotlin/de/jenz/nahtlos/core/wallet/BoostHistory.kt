@@ -12,6 +12,8 @@ data class BoostHistoryEntry(
     val podcast: String,
     val episode: String,
     val totalSats: Long,
+    val message: String,
+    val senderName: String,
     val recipients: List<BoostRecipientLine>,
     val canRetry: Boolean,
 )
@@ -31,6 +33,8 @@ fun StoredPayment.toSync(): BoostSyncItem = BoostSyncItem(
     totalSats = totalSats,
     podcast = podcast,
     episode = episode,
+    message = message,
+    senderName = senderName,
     recipients = splits.map { split ->
         BoostRecipientSync(
             name = split.name.ifBlank { "Empfänger" },
@@ -61,6 +65,8 @@ fun StoredPayment.toHistory(): BoostHistoryEntry = BoostHistoryEntry(
     podcast = podcast,
     episode = episode,
     totalSats = totalSats,
+    message = message,
+    senderName = senderName,
     canRetry = splits.any { it.status == "failed" },
     recipients = splits.map { split ->
         BoostRecipientLine(
