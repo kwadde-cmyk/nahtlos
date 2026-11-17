@@ -179,6 +179,12 @@ class SyncClient @Inject constructor(
         return json.decodeFromString(authed(settings, path, "GET", null))
     }
 
+    suspend fun putBoostPrefs(settings: ServerSettings, prefs: de.jenz.nahtlos.sync.BoostPrefs): de.jenz.nahtlos.sync.BoostPrefs =
+        json.decodeFromString(authed(settings, "/v1/boost-prefs", "PUT", json.encodeToString(prefs)))
+
+    suspend fun getBoostPrefs(settings: ServerSettings): de.jenz.nahtlos.sync.BoostPrefs =
+        json.decodeFromString(authed(settings, "/v1/boost-prefs", "GET", null))
+
     suspend fun putPushToken(settings: ServerSettings, token: String) {
         authed(settings, "/v1/nostr/push", "PUT", json.encodeToString(PushTokenBody(token)))
     }

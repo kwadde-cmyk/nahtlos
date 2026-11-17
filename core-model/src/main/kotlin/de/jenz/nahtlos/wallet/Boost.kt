@@ -127,6 +127,58 @@ object BoostSplits {
 
 enum class BoostAction { BOOST, STREAM }
 
+/**
+ * Längen für Boostagram, LNURL-Kommentar und Kurztexte.
+ * Der TLV-Record trägt die volle Nachricht. Eine Lightning-Adresse
+ * bekommt nur so viel, wie ihr `commentAllowed` hergibt.
+ */
+object BoostText {
+    const val MESSAGE_MAX = 500
+    const val SENDER_MAX = 40
+    const val PHRASE_MAX = 40
+    const val PHRASES_MAX = 8
+
+    fun message(raw: String?): String = raw.orEmpty().trim().take(MESSAGE_MAX)
+
+    fun sender(raw: String?): String = raw.orEmpty().trim().take(SENDER_MAX)
+
+    fun phrases(lines: List<String>): List<String> = lines
+        .map { it.trim().replace('\n', ' ').replace('\r', ' ') }
+        .filter { it.isNotBlank() }
+        .map { it.take(PHRASE_MAX) }
+        .distinct()
+        .take(PHRASES_MAX)
+
+    /** Null, wenn die Adresse keinen Kommentar annimmt oder der Text leer ist. */
+    fun lnurlComment(comment: String?, allowed: Int): String? {
+        if (allowed <= 0) return null
+        val text = message(comment)
+        if (text.isBlank()) return null
+        return text.take(allowed)
+    }
+
+    fun secret(text: String): String? {
+        val folded = text.lowercase()
+        if ("nostr+walletconnect" in folded) return "Wallet-Link"
+        if ("nsec1" in folded) return "Privater Schlüssel"
+        if (folded.contains("lnbc")) return "Invoice"
+        return null
+    }
+}
+
+/** Nostr-Name, solange ein Konto verbunden ist. Sonst der Name aus den Einstellungen. */
+object BoostSender {
+    const val FALLBACK = "Nahtlos"
+
+    fun resolve(settingsName: String, nostrName: String, nostrConnected: Boolean): String {
+        if (nostrConnected) {
+            val fromNostr = BoostText.sender(nostrName)
+            if (fromNostr.isNotBlank()) return fromNostr
+        }
+        return BoostText.sender(settingsName).ifBlank { FALLBACK }
+    }
+}
+
 data class BoostMeta(
     val action: BoostAction = BoostAction.BOOST,
     val podcast: String,
@@ -138,7 +190,7 @@ data class BoostMeta(
     val totalMsat: Long,
     val message: String?,
     val senderName: String?,
-    val appVersion: String = "0.1.0",
+    val appVersion: String = "0.2.0",
 )
 
 data class TlvRecord(val type: Long, val valueHex: String)
@@ -146,6 +198,7 @@ data class TlvRecord(val type: Long, val valueHex: String)
 object Boostagram {
     const val TLV = 7629169L
     const val APP = "Nahtlos"
+    const val APP_VERSION = "0.2.0"
     private val json = Json { explicitNulls = false; encodeDefaults = false }
 
     @Serializable
@@ -171,7 +224,7 @@ object Boostagram {
         Body(
             action = if (meta.action == BoostAction.STREAM) "stream" else "boost",
             app_name = APP,
-            app_version = meta.appVersion,
+            app_version = meta.appVersion.ifBlank { APP_VERSION },
             value_msat = share.sats * 1000,
             value_msat_total = meta.totalMsat,
             url = meta.feedUrl?.ifBlank { null },
@@ -181,8 +234,8 @@ object Boostagram {
             guid = meta.feedGuid?.ifBlank { null },
             episode_guid = meta.episodeGuid?.ifBlank { null },
             ts = meta.positionSec,
-            message = meta.message?.ifBlank { null },
-            sender_name = meta.senderName?.ifBlank { null },
+            message = BoostText.message(meta.message).ifBlank { null },
+            sender_name = BoostText.sender(meta.senderName).ifBlank { null },
             name = share.name.ifBlank { null },
         ),
     )
@@ -222,11 +275,8 @@ object LnurlPay {
         }
         val allowed = meta.commentAllowed ?: 0
         val joiner = if (callback.contains("?")) "&" else "?"
-        val commentPart = if (allowed > 0 && !comment.isNullOrBlank()) {
-            "&comment=" + URLEncoder.encode(comment.take(allowed), StandardCharsets.UTF_8)
-        } else {
-            ""
-        }
+        val clipped = BoostText.lnurlComment(comment, allowed)
+        val commentPart = if (clipped == null) "" else "&comment=" + URLEncoder.encode(clipped, StandardCharsets.UTF_8)
         val invoice = parse(fetch("$callback${joiner}amount=$amountMsat$commentPart"))
         invoice.failure?.let { throw WalletException(it) }
         return invoice.pr ?: throw WalletException("LNURL hat keine Invoice geliefert")

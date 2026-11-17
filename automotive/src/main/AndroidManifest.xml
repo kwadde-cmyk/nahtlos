@@ -52,11 +52,13 @@
         -->
         <!--
             Startseite ist die Wiedergabe, auch während der Fahrt.
-            Keine Textfelder. Bibliothek öffnet das Mediencenter.
+            Der Boost-Kommentar nutzt dasselbe Textfeld wie die Nostr-Kommentare.
+            Bibliothek öffnet das Mediencenter.
         -->
         <activity
             android:name=".NowPlayingActivity"
             android:exported="true"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -64,6 +64,7 @@ class NostrViewModel @Inject constructor(
             amberInstalled = amber.installed(),
             relays = nostr.relayText(),
         )
+        boosts.refresh()
     }
 
     fun login() = work {

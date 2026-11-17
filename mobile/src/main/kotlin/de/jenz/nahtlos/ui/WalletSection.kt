@@ -9,10 +9,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +46,8 @@ fun WalletSection(
     var sender by remember(state.senderName) { mutableStateOf(state.senderName) }
     var defaultSats by remember(state.defaultSats) { mutableStateOf(state.defaultSats.toString()) }
     var budget by remember(state.dailyBudget) { mutableStateOf(state.dailyBudget.toString()) }
+    var phrases by remember(state.phrases) { mutableStateOf(state.phrases.joinToString("\n")) }
+    var nostrBoost by remember(state.nostrComment) { mutableStateOf(state.nostrComment) }
     var scan by remember { mutableStateOf(false) }
     var camera by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -113,6 +118,11 @@ fun WalletSection(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
+        Text(
+            "Solange Nostr verbunden ist, steht dein Nostr-Name im Boost. Sonst dieser Name.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
         OutlinedTextField(
             value = defaultSats,
             onValueChange = { defaultSats = it.filter { char -> char.isDigit() }.take(7) },
@@ -130,6 +140,31 @@ fun WalletSection(
         TextButton(onClick = {
             viewModel.saveLimits(sender, defaultSats.toLongOrNull() ?: 210, budget.toLongOrNull() ?: 5000)
         }) { Text("Beträge speichern") }
+        Text("Kurztexte fürs Auto", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+        Text(
+            "Eine Zeile pro Text. Im Auto füllen sie das Kommentarfeld, auch während der Fahrt. Freitext bleibt immer möglich.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            value = phrases,
+            onValueChange = { phrases = it.take(400) },
+            label = { Text("Kurztexte") },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Boost auch als Nostr-Kommentar", modifier = Modifier.weight(1f))
+            Switch(checked = nostrBoost, onCheckedChange = { nostrBoost = it })
+        }
+        Text(
+            "Nur wenn der Schalter an ist. Die Nachricht geht als Kommentar der Folge über die bestehende Signatur. Ohne Nachricht wird nichts veröffentlicht.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        TextButton(onClick = { viewModel.saveBoostPrefs(phrases, nostrBoost) }) { Text("Kurztexte speichern") }
         TextButton(onClick = onOpenHistory, modifier = Modifier.padding(top = 8.dp)) { Text("Boost-Verlauf") }
         if (state.history.isNotEmpty()) {
             Text("Letzte Zahlungen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
@@ -140,6 +175,7 @@ fun WalletSection(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                if (payment.message.isNotBlank()) Text(payment.message)
                 payment.lines.forEach { line ->
                     Text(
                         line.text,

@@ -5,11 +5,18 @@ import de.jenz.nahtlos.core.Payments
 import de.jenz.nahtlos.core.db.extras
 import de.jenz.nahtlos.core.db.valueRecipients
 import de.jenz.nahtlos.core.feed.FeedRepository
+import de.jenz.nahtlos.core.nostr.BoostNostrComments
+import de.jenz.nahtlos.core.nostr.IdentityStore
+import de.jenz.nahtlos.core.sync.SettingsStore
 import de.jenz.nahtlos.model.ValueRecipient
 import de.jenz.nahtlos.model.ValueTimeSplit
+import de.jenz.nahtlos.sync.BoostPrefs
+import de.jenz.nahtlos.sync.BoostPrefsSync
 import de.jenz.nahtlos.wallet.BoostAction
 import de.jenz.nahtlos.wallet.BoostMeta
+import de.jenz.nahtlos.wallet.BoostSender
 import de.jenz.nahtlos.wallet.BoostSplits
+import de.jenz.nahtlos.wallet.BoostText
 import de.jenz.nahtlos.wallet.Boostagram
 import de.jenz.nahtlos.wallet.Bytes
 import de.jenz.nahtlos.wallet.LnurlPay
@@ -17,6 +24,9 @@ import de.jenz.nahtlos.wallet.NwcRequests
 import de.jenz.nahtlos.wallet.SecretScrub
 import de.jenz.nahtlos.wallet.SplitShare
 import de.jenz.nahtlos.wallet.WalletException
+import dagger.Lazy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import de.jenz.nahtlos.sync.BoostSync
@@ -26,6 +36,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -60,7 +71,11 @@ class BoostService @Inject constructor(
     private val nwc: NwcClient,
     private val http: OkHttpClient,
     private val feeds: FeedRepository,
+    private val settings: SettingsStore,
+    private val identity: IdentityStore,
+    private val nostrComments: Lazy<BoostNostrComments>,
 ) {
+    private val followUp = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val busy = AtomicBoolean(false)
     private val _state = MutableStateFlow(WalletUi())
     val state: StateFlow<WalletUi> = _state.asStateFlow()
@@ -73,24 +88,40 @@ class BoostService @Inject constructor(
     }
 
     fun refresh() {
+        val keepBusy = _state.value.busy
         _state.value = try {
             healStuck()
             val uri = store.readUri()
+            val prefs = runCatching { settings.boostPrefs() }.getOrDefault(BoostPrefs())
             WalletUi(
                 connected = uri != null,
                 alias = store.alias(),
                 balanceLabel = store.balanceLabel(),
                 methods = store.methods(),
                 senderName = store.senderName(),
+                suggestedSender = senderNow(),
+                phrases = prefs.phrases,
+                nostrComment = prefs.nostrComment,
                 defaultSats = store.defaultSats(),
                 dailyBudget = store.dailyBudget(),
                 spentToday = store.spentToday(),
                 history = store.history().map { it.toView() },
                 historyEntries = store.history().map { it.toHistory() },
+                busy = keepBusy,
             )
         } catch (error: Exception) {
             WalletUi(storageError = "Die sichere Ablage ist nicht verfügbar. Der Wallet-Link wurde nicht gespeichert.")
         }
+    }
+
+    fun saveBoostPrefs(lines: String, nostrComment: Boolean) {
+        val next = BoostPrefsSync.normalize(
+            BoostPrefs(lines.lines(), nostrComment, System.currentTimeMillis()),
+        )
+        val reason = BoostPrefsSync.reject(next)
+        if (reason != null) throw WalletException("Kurztexte abgelehnt: $reason")
+        settings.saveBoostPrefs(next)
+        refresh()
     }
 
     suspend fun connect(raw: String): String {
@@ -151,8 +182,8 @@ class BoostService @Inject constructor(
             feedGuid = input.feedGuid,
             episodeGuid = input.episodeGuid,
             positionSec = input.positionMs?.div(1000),
-            message = input.message.trim(),
-            senderName = input.senderName.ifBlank { store.senderName() },
+            message = BoostText.message(input.message),
+            senderName = BoostText.sender(input.senderName).ifBlank { senderNow() },
             totalSats = amount,
             updatedAt = System.currentTimeMillis(),
             splits = shares.map { share ->
@@ -169,7 +200,9 @@ class BoostService @Inject constructor(
             },
         )
         store.upsert(record)
-        pay(record)
+        val view = pay(record)
+        offerNostr(record, view)
+        view
         }
     }
 
@@ -237,7 +270,7 @@ class BoostService @Inject constructor(
         return "Zap gesendet: $amountSats sats an ${recipientName.ifBlank { "den Empfänger" }}."
     }
 
-    suspend fun quickBoost(episodeKey: String, positionMs: Long): PaymentView {
+    suspend fun quickBoost(episodeKey: String, positionMs: Long, message: String = ""): PaymentView {
         ensurePayments()
         return guard {
         val episode = feeds.getEpisode(episodeKey) ?: throw WalletException("Keine Folge in der Wiedergabe.")
@@ -255,8 +288,8 @@ class BoostService @Inject constructor(
                 timeSplits = extra.valueTimeSplits,
                 channelRecipients = podcast.valueRecipients(),
                 amountSats = store.defaultSats(),
-                message = "",
-                senderName = store.senderName(),
+                message = message,
+                senderName = senderNow(),
             ),
         )
         }
@@ -327,8 +360,8 @@ class BoostService @Inject constructor(
             feedGuid = input.feedGuid,
             episodeGuid = input.episodeGuid,
             positionSec = input.positionMs?.div(1000),
-            message = "",
-            senderName = input.senderName,
+            message = BoostText.message(input.message),
+            senderName = BoostText.sender(input.senderName).ifBlank { senderNow() },
             totalSats = amount,
             updatedAt = System.currentTimeMillis(),
             splits = shares.map { share ->
@@ -345,7 +378,25 @@ class BoostService @Inject constructor(
             },
         )
         store.upsert(record)
-        return pay(record)
+        val view = pay(record)
+        offerNostr(record, view)
+        return view
+    }
+
+    private fun senderNow(): String {
+        val nostr = runCatching { identity.read() }.getOrNull()
+        return BoostSender.resolve(store.senderName(), nostr?.name.orEmpty(), nostr?.loggedIn == true)
+    }
+
+    private fun offerNostr(payment: StoredPayment, view: PaymentView) {
+        if (payment.message.isBlank() || view.lines.all { it.error }) return
+        followUp.launch {
+            runCatching { nostrComments.get().maybe(payment) }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    AppLog.record("Nostr", "Boost-Kommentar nicht gesendet.")
+                }
+        }
     }
 
     private suspend fun pay(start: StoredPayment): PaymentView {
@@ -386,7 +437,7 @@ class BoostService @Inject constructor(
         if (split.type == "lnaddress" && bolt11.isNullOrBlank()) {
             try {
                 bolt11 = withContext(Dispatchers.IO) {
-                    LnurlPay.invoice(split.address, split.sats * 1000, payment.message.takeIf { it.isNotBlank() }, ::fetchLnurl)
+                    LnurlPay.invoice(split.address, split.sats * 1000, BoostText.message(payment.message).ifBlank { null }, ::fetchLnurl)
                 }
                 current = update(current, index) { it.copy(bolt11 = bolt11) }
             } catch (error: CancellationException) {

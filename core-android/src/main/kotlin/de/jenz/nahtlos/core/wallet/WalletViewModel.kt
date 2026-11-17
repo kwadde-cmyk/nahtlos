@@ -3,6 +3,7 @@ package de.jenz.nahtlos.core.wallet
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import de.jenz.nahtlos.core.sync.SyncRepository
 import de.jenz.nahtlos.sync.BoostSync
 import de.jenz.nahtlos.wallet.SecretScrub
 import kotlinx.coroutines.CancellationException
@@ -15,7 +16,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class WalletViewModel @Inject constructor(private val boosts: BoostService) : ViewModel() {
+class WalletViewModel @Inject constructor(
+    private val boosts: BoostService,
+    private val sync: SyncRepository,
+) : ViewModel() {
     val state = boosts.state
     private val _notice = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val notice = _notice.asSharedFlow()
@@ -30,6 +34,19 @@ class WalletViewModel @Inject constructor(private val boosts: BoostService) : Vi
 
     fun saveLimits(sender: String, defaultSats: Long, budget: Long) {
         runCatching { boosts.saveLimits(sender, defaultSats, budget) }
+            .onFailure { _notice.tryEmit(SecretScrub.message(it.message)) }
+    }
+
+    fun refresh() = boosts.refresh()
+
+    fun saveBoostPrefs(lines: String, nostrComment: Boolean) {
+        runCatching { boosts.saveBoostPrefs(lines, nostrComment) }
+            .onSuccess {
+                viewModelScope.launch {
+                    runCatching { sync.pullAndMerge(force = true) }
+                        .onFailure { _notice.emit(SecretScrub.message(it.message)) }
+                }
+            }
             .onFailure { _notice.tryEmit(SecretScrub.message(it.message)) }
     }
 
