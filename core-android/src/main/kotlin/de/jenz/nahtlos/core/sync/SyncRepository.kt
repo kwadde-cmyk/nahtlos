@@ -485,7 +485,7 @@ class SyncRepository @Inject constructor(
             if (error.code == 404) return
             throw error
         }
-        val chosen = BoostPrefsSync.pick(local, remote)
+        val chosen = BoostPrefsSync.prefer(local, remote)
         if (chosen !== local) {
             settings.saveBoostPrefs(chosen)
         } else if (chosen.updatedAt != local.updatedAt || chosen.phrases != local.phrases || chosen.nostrComment != local.nostrComment) {
