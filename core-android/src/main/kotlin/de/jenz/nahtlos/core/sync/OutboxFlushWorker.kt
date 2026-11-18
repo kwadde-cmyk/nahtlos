@@ -22,6 +22,8 @@ import javax.inject.Singleton
 /**
  * Schedules a unique connected-network job. WorkManager keeps it across process death,
  * so a position written to the outbox still leaves if nobody opens the app again.
+ *
+ * Nach Netzausfall holt der Job zuerst den aktuellen Stand vom Pi und lädt erst danach hoch.
  */
 @Singleton
 class OutboxWork @Inject constructor(
@@ -58,7 +60,9 @@ class OutboxFlushWorker(
             OutboxWorkerEntryPoint::class.java,
         ).syncRepository()
         return try {
-            sync.flushPending()
+            // Zuerst holen, dann hochladen. Verhindert, dass eine alte lokale Position
+            // nach dem Netzausfall den neueren Stand vom anderen Gerät überschreibt.
+            sync.pullAndMerge(force = true)
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
