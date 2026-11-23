@@ -75,6 +75,8 @@ private val Ink = Color(0xFF1A0E00)
 private val Track = Color(0xFF2A241C)
 private val ButtonShape = RoundedCornerShape(22.dp)
 
+private enum class CarMenu { Shownotes, Chapters, People, Support, Boost }
+
 @AndroidEntryPoint
 class NowPlayingActivity : ComponentActivity() {
     @Inject lateinit var player: PlayerConnection
@@ -111,6 +113,7 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
     var showTitle by remember { mutableStateOf("") }
     var page by remember { mutableStateOf<String?>(null) }
     var zapAddress by remember { mutableStateOf<String?>(null) }
+    var openMenu by remember(playback.episodeKey) { mutableStateOf<CarMenu?>(null) }
     LaunchedEffect(playback.episodeKey) {
         val key = playback.episodeKey
         if (key.isNullOrBlank()) {
@@ -144,126 +147,115 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
     }
     val something = playback.title.isNotBlank() || !playback.episodeKey.isNullOrBlank()
     BoxWithConstraints(Modifier.fillMaxSize()) {
-    val coverEdge = AutoDrive.coverEdgeDp(maxHeight.value.toInt(), driving).dp
-    Column(
-        Modifier
-            .fillMaxSize()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val headline = nostrUi.notice.ifBlank { banner }
-        headline?.let { text ->
-            Text(
-                text,
-                fontSize = AutoDrive.BODY_SP.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (
-                    text.startsWith(BoostSync.OUTCOME_FAIL) ||
-                    text.startsWith("Eine Zahlung") ||
-                    text.startsWith("Zap nicht") ||
-                    text.startsWith("Zap unklar") ||
-                    text.contains("Tagesbudget")
-                ) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    HoppOrange
-                },
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            )
-        }
-        if (!something) {
-            Text(
-                "Nichts läuft",
-                fontSize = AutoDrive.TITLE_SP.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 48.dp),
-            )
-            Text(
-                "Starte eine Folge aus der Bibliothek oder der Playlist.",
-                fontSize = AutoDrive.BODY_SP.sp,
-                modifier = Modifier.padding(top = 12.dp, bottom = 28.dp),
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TransportRow {
-                DriveButton(
-                    "Bibliothek",
-                    filled = true,
-                    onClick = { MediaCenterExit.open(context) },
-                )
-                DriveButton(
-                    "Einstellungen",
-                    filled = false,
-                    onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
-                )
+        val coverEdge = AutoDrive.coverEdgeDp(maxHeight.value.toInt(), driving).dp
+        Column(
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton("Bibliothek") { MediaCenterExit.open(context) }
+                IconButton("Einstellungen") {
+                    context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName))
+                }
             }
-        } else {
-            Cover(playback.artworkUri, coverEdge)
-            Text(
-                playback.title.ifBlank { "Folge" },
-                fontSize = AutoDrive.TITLE_SP.sp,
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 38.sp,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 16.dp),
-            )
-            if (playback.artist.isNotBlank()) {
+            val headline = nostrUi.notice.ifBlank { banner }
+            headline?.let { text ->
                 Text(
-                    playback.artist,
+                    text,
                     fontSize = AutoDrive.BODY_SP.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (
+                        text.startsWith(BoostSync.OUTCOME_FAIL) ||
+                        text.startsWith("Eine Zahlung") ||
+                        text.startsWith("Zap nicht") ||
+                        text.startsWith("Zap unklar") ||
+                        text.contains("Tagesbudget")
+                    ) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        HoppOrange
+                    },
                     textAlign = TextAlign.Center,
-                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
+            }
+            if (!something) {
+                Text(
+                    "Nichts läuft",
+                    fontSize = AutoDrive.TITLE_SP.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 48.dp),
+                )
+                Text(
+                    "Starte eine Folge aus der Bibliothek oder der Playlist.",
+                    fontSize = AutoDrive.BODY_SP.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 28.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Cover(playback.artworkUri, coverEdge)
+                Text(
+                    playback.title.ifBlank { "Folge" },
+                    fontSize = AutoDrive.TITLE_SP.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 38.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 16.dp),
                 )
-            }
-            Progress(playback)
-            Text(
-                "${clock(playback.positionMs)} / ${clock(playback.durationMs)}",
-                fontSize = AutoDrive.BODY_SP.sp,
-                modifier = Modifier.padding(top = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TransportRow(Modifier.padding(top = 18.dp)) {
-                DriveButton("−15s", filled = false, onClick = player::seekBack)
-                DriveButton(
-                    if (playback.isPlaying) "Pause" else "Play",
-                    filled = true,
-                    onClick = player::toggle,
+                if (playback.artist.isNotBlank()) {
+                    Text(
+                        playback.artist,
+                        fontSize = AutoDrive.BODY_SP.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Progress(playback)
+                Text(
+                    "${clock(playback.positionMs)} / ${clock(playback.durationMs)}",
+                    fontSize = AutoDrive.BODY_SP.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                DriveButton("+15s", filled = false, onClick = player::seekForward)
-            }
-            val showLike = nostrUi.loggedIn && !episodeGuid.isNullOrBlank()
-            val showZap = showLike && Payments.enabled && !zapAddress.isNullOrBlank()
-            val actionCount = 2 + (if (showLike) 1 else 0) + (if (showZap) 1 else 0) + (if (Payments.enabled) 1 else 0)
-            BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                val buttonWidth = AutoDrive.actionButtonWidthDp(maxWidth.value.toInt(), actionCount).dp
+                TransportRow(Modifier.padding(top = 18.dp)) {
+                    DriveButton("−15s", filled = false, onClick = player::seekBack)
+                    DriveButton(
+                        if (playback.isPlaying) "Pause" else "Play",
+                        filled = true,
+                        onClick = player::toggle,
+                    )
+                    DriveButton("+15s", filled = false, onClick = player::seekForward)
+                }
+                val showLike = nostrUi.loggedIn && !episodeGuid.isNullOrBlank()
+                val showZap = showLike && Payments.enabled && !zapAddress.isNullOrBlank()
                 Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(AutoDrive.ACTION_GAP_DP.dp, Alignment.CenterHorizontally),
+                    Modifier.fillMaxWidth().padding(top = 16.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (showLike) {
-                        DriveButton(
-                            "Like",
-                            filled = false,
-                            buttonWidth = buttonWidth,
-                            onClick = { nostr.likeEpisode(episodeGuid!!, podcastGuid) },
-                        )
+                        DriveButton("Like", filled = false, onClick = { nostr.likeEpisode(episodeGuid!!, podcastGuid) })
                     }
                     if (showZap) {
                         DriveButton(
                             nostrUi.zap.label(episodeGuid!!, "Zap"),
                             filled = true,
                             enabled = !nostrUi.busy,
-                            buttonWidth = buttonWidth,
                             onClick = {
                                 nostr.zap(
                                     target = episodeGuid!!,
@@ -277,91 +269,123 @@ private fun NowPlaying(player: PlayerConnection, boosts: BoostService, feeds: Fe
                             },
                         )
                     }
+                    MenuChip("Shownotes", openMenu == CarMenu.Shownotes) { openMenu = if (openMenu == CarMenu.Shownotes) null else CarMenu.Shownotes }
+                    MenuChip("Kapitel", openMenu == CarMenu.Chapters) { openMenu = if (openMenu == CarMenu.Chapters) null else CarMenu.Chapters }
+                    MenuChip("Personen", openMenu == CarMenu.People) { openMenu = if (openMenu == CarMenu.People) null else CarMenu.People }
+                    MenuChip("Unterstützen", openMenu == CarMenu.Support) { openMenu = if (openMenu == CarMenu.Support) null else CarMenu.Support }
                     if (Payments.enabled) {
-                        DriveButton(
-                            if (sending) "…" else "Boost",
-                            filled = true,
-                            enabled = !sending,
-                            buttonWidth = buttonWidth,
-                            onClick = {
-                                if (!BoostSync.acceptTap(sending)) return@DriveButton
-                                val key = playback.episodeKey
-                                if (key.isNullOrBlank()) {
-                                    banner = "Boost nicht gesendet. Keine Folge in der Wiedergabe."
-                                    return@DriveButton
-                                }
-                                sending = true
-                                banner = null
-                                val note = comment
-                                val position = playback.positionMs
-                                scope.launch {
-                                    val text = try {
-                                        boosts.outcomeText(boosts.quickBoost(key, position, note))
-                                    } catch (error: CancellationException) {
-                                        throw error
-                                    } catch (error: Exception) {
-                                        CarControls.boostNotice(SecretScrub.message(error.message))
-                                    }
-                                    banner = text
-                                    sending = false
-                                }
-                            },
-                        )
+                        MenuChip("Boost", openMenu == CarMenu.Boost) { openMenu = if (openMenu == CarMenu.Boost) null else CarMenu.Boost }
                     }
-                    DriveButton(
-                        "Bibliothek",
-                        filled = false,
-                        buttonWidth = buttonWidth,
-                        onClick = { MediaCenterExit.open(context) },
-                    )
-                    DriveButton(
-                        "Einstellungen",
-                        filled = false,
-                        buttonWidth = buttonWidth,
-                        onClick = { context.startActivity(AutomotiveSetup.preferencesIntent(context.packageName)) },
+                }
+                when (openMenu) {
+                    CarMenu.Shownotes -> {
+                        if (notes.isNotBlank()) {
+                            Text(notes, fontSize = AutoDrive.BODY_SP.sp, modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
+                        } else {
+                            Text("Keine Shownotes.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
+                        }
+                    }
+                    CarMenu.Chapters -> {
+                        Text("Kapitel (Tippen zum Springen kommt mit der nächsten Fassung).", modifier = Modifier.padding(top = 16.dp))
+                    }
+                    CarMenu.People -> {
+                        Text("Personen aus dem Feed erscheinen hier.", modifier = Modifier.padding(top = 16.dp))
+                    }
+                    CarMenu.Support -> {
+                        Text("Unterstützen: Funding-Links und Value4Value.", modifier = Modifier.padding(top = 16.dp))
+                    }
+                    CarMenu.Boost -> {
+                        if (Payments.enabled) {
+                            BoostCommentField(comment, wallet.phrases) { comment = it }
+                            DriveButton(
+                                if (sending) "…" else "Senden",
+                                filled = true,
+                                enabled = !sending,
+                                modifier = Modifier.padding(top = 12.dp),
+                                onClick = {
+                                    if (!BoostSync.acceptTap(sending)) return@DriveButton
+                                    val key = playback.episodeKey
+                                    if (key.isNullOrBlank()) {
+                                        banner = "Boost nicht gesendet. Keine Folge in der Wiedergabe."
+                                        return@DriveButton
+                                    }
+                                    sending = true
+                                    banner = null
+                                    val note = comment
+                                    val position = playback.positionMs
+                                    scope.launch {
+                                        val text = try {
+                                            boosts.outcomeText(boosts.quickBoost(key, position, note))
+                                        } catch (error: CancellationException) {
+                                            throw error
+                                        } catch (error: Exception) {
+                                            CarControls.boostNotice(SecretScrub.message(error.message))
+                                        }
+                                        banner = text
+                                        sending = false
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    null -> {}
+                }
+                playback.error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = AutoDrive.BODY_SP.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
-            }
-            if (Payments.enabled) {
-                BoostCommentField(
-                    text = comment,
-                    phrases = wallet.phrases,
-                    onText = { comment = it },
+                CarComments(
+                    parked = !driving,
+                    episodeGuid = episodeGuid,
+                    podcastGuid = podcastGuid,
+                    showTitle = showTitle,
+                    episodeTitle = playback.title,
+                    page = page,
+                    nostr = nostr,
                 )
             }
-            playback.error?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = AutoDrive.BODY_SP.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-            if (!driving && notes.isNotBlank()) {
-                Text(
-                    "Shownotes",
-                    fontSize = AutoDrive.BODY_SP.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                )
-                Text(
-                    notes,
-                    fontSize = AutoDrive.BODY_SP.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-            }
-            CarComments(
-                parked = !driving,
-                episodeGuid = episodeGuid,
-                podcastGuid = podcastGuid,
-                showTitle = showTitle,
-                episodeTitle = playback.title,
-                page = page,
-                nostr = nostr,
-            )
         }
     }
+}
+
+@Composable
+private fun IconButton(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(56.dp).padding(4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent,
+        contentColor = HoppOrange,
+        border = BorderStroke(2.dp, HoppOrange),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(label.take(1), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun MenuChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.height(AutoDrive.BUTTON_HEIGHT_DP.dp).width(140.dp),
+        shape = ButtonShape,
+        color = if (selected) HoppOrange else Color.Transparent,
+        contentColor = if (selected) Ink else HoppOrange,
+        border = if (selected) null else BorderStroke(3.dp, HoppOrange),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = AutoDrive.LABEL_SP.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -400,10 +424,6 @@ private fun Progress(playback: PlayerSnapshot) {
     }
 }
 
-/**
- * Eine Fläche, eine Kontur. Keine Schattenhöhe: die Headunit zeichnet Elevation sonst
- * als versetzte zweite Kante neben der gefüllten Fläche.
- */
 @Composable
 private fun DriveButton(
     label: String,
@@ -440,7 +460,7 @@ private fun DriveButton(
 }
 
 @Composable
-private fun Cover(uri: String?, edge: androidx.compose.ui.unit.Dp) {
+private fun Cover(uri: String?, edge: Dp) {
     if (uri.isNullOrBlank()) {
         Surface(
             modifier = Modifier.size(edge),
@@ -459,10 +479,6 @@ private fun Cover(uri: String?, edge: androidx.compose.ui.unit.Dp) {
     }
 }
 
-/**
- * Dieselbe Texteingabe wie die Nostr-Kommentare: normales Textfeld, auch während der Fahrt.
- * Kurztexte füllen das Feld nur vor.
- */
 @Composable
 private fun BoostCommentField(
     text: String,
@@ -477,7 +493,7 @@ private fun BoostCommentField(
         textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = AutoDrive.BODY_SP.sp),
     )
     Text(
-        "Optional. Geht mit dem Boost an die Empfänger, auch während der Fahrt.",
+        "Optional. Geht mit dem Boost an die Empfänger.",
         fontSize = AutoDrive.BODY_SP.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
